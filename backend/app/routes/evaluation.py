@@ -59,6 +59,7 @@ def _eval_out(e: dict, mission: dict) -> dict:
         "reward": mission.get("reward_amount", 0) if e.get("reward_unlocked", 0) else 0,
         "ai_explanation": e.get("ai_explanation") or "",
         "reason": e.get("reason") or "",
+        "observed": e.get("observed", "") or "",
         "verdict_reason": e.get("ai_explanation") or "",
         "recommendations": e.get("recommendations", []),
         "passed_checks": e.get("passed_checks", [

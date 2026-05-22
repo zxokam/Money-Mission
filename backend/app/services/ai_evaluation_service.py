@@ -77,20 +77,33 @@ Target: {data['target_pct']}%
 Spending breakdown:
 {data['cat_summary']}
 
-VERDICT RULES:
+Income: RM{data['income']:.2f}. Required expenses: RM{data['required']:.2f}. The participant spent RM{data['actual_spending']:.2f} total.
+
+STEP 1: Look at the spending breakdown ONE BY ONE. For each category, note whether the spending is reasonable. Be specific — "RM45.80 on Food Delivery across 3 orders at GrabFood" NOT just "food spending".
+
+STEP 2: Compare the actual leftover (RM{data['actual_leftover']:.2f}) against the expected leftover (RM{data['expected_leftover']:.2f}). Did they save more than expected?
+
+STEP 3: Decide verdict:
 - If improvement ({data['improvement_pct']:+.1f}%) meets or exceeds target ({data['target_pct']}%): APPROVED. The participant reduced spending successfully.
-- If improvement is below target: REJECTED. The participant did not cut spending enough.
-
-Income: RM{data['income']:.2f}. Required expenses: RM{data['required']:.2f}. The participant spent RM{data['actual_spending']:.2f} total."""
+- If improvement is below target: REJECTED. The participant did not cut spending enough."""
 
 
-    prompt += f"""
+    if photo_diary:
+        prompt += f"""
 
 ═══════════════════════════════════
 YOUR RESPONSE
 ═══════════════════════════════════
 Respond with this exact JSON (no markdown, no code fences, no extra text):
-{{"verdict": "approved" OR "rejected", "observed": "EXACTLY what objects you see in the photo(s). One sentence. Be specific. Example: 'Clear glass half-filled with transparent liquid, sitting on a wooden table.'", "reason": "Short sentence comparing observed contents to required subject '{photo_diary.get('subject', 'N/A') if photo_diary else 'financial target'}'. Example: 'Photo shows a glass of water which matches the subject.' or 'Photo shows a coffee mug, not water — mismatch.'", "explanation": "3-5 sentences. The FIRST sentence must describe what you observed in the photo. THEN judge whether it matches. TONE MUST MATCH verdict. APPROVED: warm, congratulate, mention RM reward. REJECTED: kind but clear about the mismatch, no congratulations or reward mention.", "recommendations": ["3 tips, each one sentence"]}}"""
+{{"verdict": "approved" OR "rejected", "observed": "EXACTLY what objects you see in the photo(s). One sentence. Be specific. Example: 'Clear glass half-filled with transparent liquid, sitting on a wooden table.'", "reason": "Short sentence comparing observed contents to required subject '{photo_diary.get('subject', 'N/A')}'. Example: 'Photo shows a glass of water which matches the subject.' or 'Photo shows a coffee mug, not water — mismatch.'", "explanation": "3-5 sentences. The FIRST sentence must describe what you observed in the photo. THEN judge whether it matches. TONE MUST MATCH verdict. APPROVED: warm, congratulate, mention RM reward. REJECTED: kind but clear about the mismatch, no congratulations or reward mention.", "recommendations": ["3 tips, each one sentence"]}}"""
+    else:
+        prompt += f"""
+
+═══════════════════════════════════
+YOUR RESPONSE
+═══════════════════════════════════
+Respond with this exact JSON (no markdown, no code fences, no extra text):
+{{"verdict": "approved" OR "rejected", "observed": "EXACTLY what spending patterns you notice. One sentence. Be specific. Example: 'Participant spent RM450.30 total across Food (RM180.50), Transport (RM120.00), and Shopping (RM149.80), leaving RM249.70 from RM700.00 income.'", "reason": "Short sentence comparing actual improvement ({data['improvement_pct']:+.1f}%) to target ({data['target_pct']}%). Example: 'Improvement of 15.3% exceeds the 10% target — mission passed.' or 'Improvement of only 3.2% falls short of the 10% target.'", "explanation": "3-5 sentences. The FIRST sentence must describe what you observed in the spending breakdown — mention the top spending categories and whether the participant saved. THEN judge whether they hit their target. TONE MUST MATCH verdict. APPROVED: warm, congratulate, mention RM{data['reward']} reward. REJECTED: kind but clear about the shortfall, no congratulations or reward mention.", "recommendations": ["3 tips, each one sentence related to the top spending categories"]}}"""
 
     return prompt
 
@@ -451,6 +464,7 @@ def run_ai_evaluation(mission, financial_setup, transactions, photo_diary: dict 
     if ai:
         explanation = ai["explanation"]
         reason = ai.get("reason", "")
+        observed = ai.get("observed", "")
         recommendations = ai["recommendations"]
 
         # Verdict is decided BY THE AI COMMENT. Period.
@@ -475,6 +489,7 @@ def run_ai_evaluation(mission, financial_setup, transactions, photo_diary: dict 
             gemini_data["participant"], gemini_data["title"],
         )
         reason = ("All requirements met" if passed else "Did not meet requirements")
+        observed = f"Participant spent RM{actual_spending:.2f} across various categories with RM{actual_leftover:.2f} leftover from RM{income:.2f} income."
         recommendations = _rule_based_recommendations(passed)
 
     # Health history
@@ -504,6 +519,7 @@ def run_ai_evaluation(mission, financial_setup, transactions, photo_diary: dict 
         "reward": reward if passed else 0,
         "ai_explanation": explanation,
         "reason": reason,
+        "observed": observed,
         "verdict_reason": explanation,
         "recommendations": recommendations,
         "passed_checks": passed_checks,

@@ -1,5 +1,5 @@
 export default function AIResultCard({ evaluation }) {
-  const { ai_verdict, reward_unlocked, reward, reason, ai_explanation } = evaluation;
+  const { ai_verdict, reward_unlocked, reward, reason, observed, ai_explanation } = evaluation;
   const accepted = ai_verdict === "accepted";
 
   return (
@@ -13,6 +13,11 @@ export default function AIResultCard({ evaluation }) {
           <p className="text-xs text-white/40 mt-1">{reason}</p>
         )}
       </div>
+
+      {/* Observed */}
+      {observed && (
+        <p className="text-sm text-white/50 leading-relaxed">{observed}</p>
+      )}
 
       {/* AI Comment */}
       {ai_explanation && (
