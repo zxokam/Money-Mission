@@ -22,27 +22,6 @@ def _eval_out(e: dict, mission: dict) -> dict:
     status = e.get("status", "accepted")
     passed = status == "accepted"
 
-    # Verdict comes from the AI comment — full stop.
-    # If the comment concludes success → Approved. If it concludes failure → Rejected.
-    expl = (e.get("ai_explanation") or "").lower()
-    is_approved = any(w in expl for w in [
-        "well done", "great effort", "great job", "congratulations",
-        "earned the", "you've earned", "keep up", "successfully",
-        "matches", "clearly shows", "good habit", "excellent",
-        "passed", "approved", "mission complete",
-    ])
-    is_rejected = any(w in expl for w in [
-        "does not match", "doesn't match", "wrong subject",
-        "did not pass", "did not meet", "fell short", "failed",
-        "not accepted", "rejected", "does not show",
-    ])
-    if is_approved and not is_rejected:
-        passed = True
-        status = "accepted"
-    elif is_rejected:
-        passed = False
-        status = "rejected"
-
     return {
         "id": e["id"],
         "mission_id": e["mission_id"],

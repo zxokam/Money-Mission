@@ -467,22 +467,9 @@ def run_ai_evaluation(mission, financial_setup, transactions, photo_diary: dict 
         observed = ai.get("observed", "")
         recommendations = ai["recommendations"]
 
-        # Verdict is decided BY THE AI COMMENT. Period.
-        # If the comment concludes the photo matches → Approved.
-        # If the comment concludes it doesn't match → Rejected.
-        expl = explanation.lower()
-        is_approved = any(w in expl for w in [
-            "well done", "great effort", "great job", "congratulations",
-            "earned the", "you've earned", "keep up", "successfully",
-            "matches", "clearly shows", "good habit", "excellent",
-            "passed", "approved", "mission complete",
-        ])
-        is_rejected = any(w in expl for w in [
-            "does not match", "doesn't match", "wrong subject",
-            "did not pass", "did not meet", "fell short", "failed",
-            "not accepted", "rejected", "does not show",
-        ])
-        passed = is_approved and not is_rejected
+        # Use AI's explicit verdict — not keyword matching
+        verdict = ai.get("verdict", "").lower()
+        passed = verdict == "approved"
     else:
         explanation = _rule_based_explanation(
             passed, improvement_pct, target_pct,
