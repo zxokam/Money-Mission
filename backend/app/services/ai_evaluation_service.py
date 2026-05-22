@@ -66,26 +66,39 @@ STEP 3: Decide verdict:
         prompt += f"""
 
 ═══════════════════════════════════
-BANK TRANSACTION VERIFICATION
+PARTICIPANT'S BUDGET SETUP
 ═══════════════════════════════════
-Total spending: RM{data['actual_spending']:.2f}
-Expected leftover: RM{data['expected_leftover']:.2f}
-Actual leftover: RM{data['actual_leftover']:.2f}
-Improvement: {data['improvement_pct']:+.1f}%
-Target: {data['target_pct']}%
+Monthly Income: RM{data['income']:.2f}
+Fixed Expenses (rent/utilities): RM{data['fixed_expenses']:.2f}
+Subscriptions: RM{data['subscriptions']:.2f}
+PayLater Commitments: RM{data['paylater_commitments']:.2f}
+Average Food Per Day: RM{data['avg_food_per_day']:.2f}
+Transport Cost: RM{data['transport_cost']:.2f}
+Other Required Expenses: RM{data['other_expenses']:.2f}
+Total Required Expenses: RM{data['required']:.2f}
+Expected Leftover (after expenses): RM{data['expected_leftover']:.2f}
+Safe Daily Spending Limit: RM{data['safe_daily_spending']:.2f}
 
-Spending breakdown:
+═══════════════════════════════════
+ACTUAL SPENDING RESULTS
+═══════════════════════════════════
+Total Actual Spending: RM{data['actual_spending']:.2f}
+Actual Leftover: RM{data['actual_leftover']:.2f}
+Improvement: {data['improvement_pct']:+.1f}% (Target: {data['target_pct']}%)
+Baseline Financial Score: {data['base_score']}/100 → New Score: {data['health_score']}/100
+
+Spending breakdown by category:
 {data['cat_summary']}
 
-Income: RM{data['income']:.2f}. Required expenses: RM{data['required']:.2f}. The participant spent RM{data['actual_spending']:.2f} total.
+STEP 1: Compare their actual spending against their budget. For each category, check if they overspent relative to their planned budget. Be specific — "Food spending of RM450 exceeds their planned RM{data['avg_food_per_day'] * 30:.0f}/month food budget by RM{450 - data['avg_food_per_day'] * 30:.0f}" NOT just "spent on food".
 
-STEP 1: Look at the spending breakdown ONE BY ONE. For each category, note whether the spending is reasonable. Be specific — "RM45.80 on Food Delivery across 3 orders at GrabFood" NOT just "food spending".
+STEP 2: Look at subscriptions (RM{data['subscriptions']:.2f}), PayLater (RM{data['paylater_commitments']:.2f}), and non-essential categories. Did they cut back where it matters? Are they overspending on wants vs needs?
 
-STEP 2: Compare the actual leftover (RM{data['actual_leftover']:.2f}) against the expected leftover (RM{data['expected_leftover']:.2f}). Did they save more than expected?
+STEP 3: Compare actual leftover (RM{data['actual_leftover']:.2f}) against expected leftover (RM{data['expected_leftover']:.2f}). Their safe daily spending was RM{data['safe_daily_spending']:.2f}/day — did they stay within it?
 
-STEP 3: Decide verdict:
-- If improvement ({data['improvement_pct']:+.1f}%) meets or exceeds target ({data['target_pct']}%): APPROVED. The participant reduced spending successfully.
-- If improvement is below target: REJECTED. The participant did not cut spending enough."""
+STEP 4: Decide verdict:
+- APPROVED: If improvement ({data['improvement_pct']:+.1f}%) meets or exceeds target ({data['target_pct']}%). They reduced spending successfully.
+- REJECTED: If improvement is below target. But acknowledge ANY positive improvement — even 2% better is progress."""
 
 
     if photo_diary:
@@ -457,6 +470,14 @@ def run_ai_evaluation(mission, financial_setup, transactions, photo_diary: dict 
         "top_amount": top_amount,
         "cat_summary": cat_summary,
         "checks_summary": checks_summary,
+        # Budget details from financial setup
+        "fixed_expenses": getattr(financial_setup, "fixed_expenses", 0),
+        "subscriptions": getattr(financial_setup, "subscriptions", 0),
+        "paylater_commitments": getattr(financial_setup, "paylater_commitments", 0),
+        "avg_food_per_day": getattr(financial_setup, "average_food_per_day", 0),
+        "transport_cost": getattr(financial_setup, "transport_cost", 0),
+        "other_expenses": getattr(financial_setup, "other_required_expenses", 0),
+        "safe_daily_spending": getattr(financial_setup, "safe_daily_spending", 0),
     }
 
     # Try OpenAI (with vision if photo_urls) → Gemini → DeepSeek → rule-based
