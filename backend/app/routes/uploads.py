@@ -99,7 +99,7 @@ Respond with ONLY valid JSON array, no markdown, no extra text:
 
 
 def _clean_json_response(content: str) -> list[dict] | None:
-    """Clean and parse JSON from AI responses."""
+    """Clean and parse JSON from AI responses, handling truncation."""
     content = content.strip()
     if content.startswith("```"):
         content = content.split("\n", 1)[-1]
@@ -112,6 +112,28 @@ def _clean_json_response(content: str) -> list[dict] | None:
         transactions = json.loads(content)
         if isinstance(transactions, list):
             return transactions
+    except json.JSONDecodeError as e:
+        # JSON was truncated mid-response — try to salvage by closing the array
+        if "Expecting value" in str(e) or "Unterminated string" in str(e):
+            content = content.rstrip()
+            # Find last complete object by backtracking to last "}," or "}]"
+            last_good = content.rfind("},")
+            if last_good > 0:
+                content = content[:last_good + 1] + "]"
+                try:
+                    transactions = json.loads(content)
+                    if isinstance(transactions, list) and len(transactions) > 0:
+                        return transactions
+                except json.JSONDecodeError:
+                    pass
+            # Simpler fallback: just close with ]
+            content = content.rstrip(",\n\r ") + "]"
+            try:
+                transactions = json.loads(content)
+                if isinstance(transactions, list) and len(transactions) > 0:
+                    return transactions
+            except json.JSONDecodeError:
+                pass
     except Exception:
         pass
     return None
@@ -135,7 +157,7 @@ async def _parse_with_openai(prompt: str) -> list[dict] | None:
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.1,
-                "max_tokens": 2000,
+                "max_tokens": 4000,
             },
             timeout=30,
         )
@@ -165,7 +187,7 @@ async def _parse_with_deepseek(prompt: str) -> list[dict] | None:
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.1,
-                "max_tokens": 2000,
+                "max_tokens": 4000,
             },
             timeout=30,
         )
@@ -242,7 +264,7 @@ This is a scanned bank statement. Look at each transaction visible in the image(
                     {"role": "user", "content": content},
                 ],
                 "temperature": 0.1,
-                "max_tokens": 2000,
+                "max_tokens": 4000,
             },
             timeout=60,
         )
