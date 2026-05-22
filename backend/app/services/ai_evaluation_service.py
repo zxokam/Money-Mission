@@ -480,8 +480,8 @@ def run_ai_evaluation(mission, financial_setup, transactions, photo_diary: dict 
         "safe_daily_spending": getattr(financial_setup, "safe_daily_spending", 0),
     }
 
-    # Try OpenAI (with vision if photo_urls) → Gemini → DeepSeek → rule-based
-    ai = _call_openai(gemini_data, photo_diary, photo_urls) or _call_gemini(gemini_data, photo_diary) or _call_deepseek(gemini_data, photo_diary)
+    # Try DeepSeek first (only reliable one) → Gemini → OpenAI → rule-based
+    ai = _call_deepseek(gemini_data, photo_diary) or _call_gemini(gemini_data, photo_diary) or _call_openai(gemini_data, photo_diary, photo_urls)
     if ai:
         explanation = ai["explanation"]
         reason = ai.get("reason", "")

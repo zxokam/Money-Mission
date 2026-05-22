@@ -237,7 +237,7 @@ async def _parse_transactions_with_ai(text: str) -> list[dict]:
 
 BANK STATEMENT TEXT:
 {text[:8000]}"""
-    return await _parse_with_openai(prompt) or await _parse_with_deepseek(prompt)
+    return await _parse_with_deepseek(prompt) or await _parse_with_openai(prompt)
 
 
 async def _parse_pdf_with_vision(pdf_bytes: bytes) -> list[dict] | None:
