@@ -8,4 +8,4 @@ httpx>=0.28
 python-multipart>=0.0.18
 supabase>=2.0
 pypdf>=5.0
-pymupdf>=1.25
+pillow>=10.0

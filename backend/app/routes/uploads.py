@@ -46,20 +46,23 @@ async def upload_bank_statement(file: UploadFile = File(...)):
 
     # Step 1: Extract text from PDF
     text = _extract_pdf_text(contents)
+    has_text = bool(text and text.strip())
 
-    # Step 2a: If text-based, parse with AI (OpenAI → DeepSeek → fail)
-    if text and text.strip():
+    # Step 2a: Try text-based parsing (OpenAI → DeepSeek)
+    if has_text:
         transactions = await _parse_transactions_with_ai(text)
         if transactions:
-            return {"transactions": transactions, "raw_text_preview": text[:500]}
+            return {"transactions": transactions, "method": "text", "raw_text_preview": text[:500]}
 
-    # Step 2b: If no text or parsing failed, try GPT-4o vision on PDF pages
-    if OPENAI_API_KEY:
-        transactions = await _parse_pdf_with_vision(contents, file.filename)
-        if transactions:
-            return {"transactions": transactions, "method": "vision"}
+    # Step 2b: Try GPT-4o vision on embedded PDF images (scanned/image-based PDFs)
+    vision_result = await _parse_pdf_with_vision(contents)
+    if vision_result:
+        return {"transactions": vision_result, "method": "vision"}
 
-    raise HTTPException(400, "AI could not extract transactions from this PDF. Make sure it's a text-based bank statement.")
+    # All methods failed — return useful error
+    if not has_text:
+        raise HTTPException(400, "Could not extract text or images from this PDF. The file may be encrypted, corrupt, or an unsupported scanned format.")
+    raise HTTPException(400, "AI could not parse the transactions from the extracted text. The PDF may contain unstructured or non-standard bank statement format.")
 
 
 def _extract_pdf_text(pdf_bytes: bytes) -> str:
@@ -183,27 +186,44 @@ BANK STATEMENT TEXT:
     return await _parse_with_openai(prompt) or await _parse_with_deepseek(prompt)
 
 
-async def _parse_pdf_with_vision(pdf_bytes: bytes, filename: str) -> list[dict] | None:
-    """Convert PDF pages to images and use GPT-4o vision for scanned/image-based PDFs."""
-    try:
-        import fitz  # PyMuPDF
-    except ImportError:
+async def _parse_pdf_with_vision(pdf_bytes: bytes) -> list[dict] | None:
+    """Extract images from PDF pages using pypdf, send to GPT-4o vision."""
+    if not OPENAI_API_KEY:
         return None
 
     try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        pages = min(len(doc), 2)
-        images = []
-        for i in range(pages):
-            page = doc[i]
-            pix = page.get_pixmap(dpi=200)
-            img_b64 = base64.b64encode(pix.tobytes("png")).decode("utf-8")
-            images.append(f"data:image/png;base64,{img_b64}")
-        doc.close()
+        from pypdf import PdfReader
+        from PIL import Image as PILImage
 
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        images = []
+        for page in reader.pages[:2]:
+            for img_obj in page.images:
+                try:
+                    img = PILImage.open(io.BytesIO(img_obj.data))
+                    # Convert to PNG for consistent handling
+                    buf = io.BytesIO()
+                    img = img.convert("RGB")
+                    img.save(buf, format="PNG")
+                    img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                    images.append(f"data:image/png;base64,{img_b64}")
+                    if len(images) >= 4:  # Max 4 images per page
+                        break
+                except Exception:
+                    continue
+    except ImportError:
+        return None
+    except Exception as e:
+        print(f"PDF image extraction error: {e}")
+        return None
+
+    if not images:
+        return None
+
+    try:
         prompt = f"""{_BANK_STATEMENT_PROMPT}
 
-This is a scanned bank statement image. Look at each transaction in the image and extract all of them."""
+This is a scanned bank statement. Look at each transaction visible in the image(s) and extract all of them."""
 
         content = [{"type": "text", "text": prompt}]
         for img in images:
@@ -232,6 +252,6 @@ This is a scanned bank statement image. Look at each transaction in the image an
         return _clean_json_response(text)
     except Exception as e:
         import traceback
-        print(f"Vision PDF parsing error: {e}")
+        print(f"Vision API error: {e}")
         traceback.print_exc()
         return None
