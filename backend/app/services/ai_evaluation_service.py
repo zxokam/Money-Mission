@@ -30,6 +30,7 @@ MISSION DETAILS ({mission_type} VERIFICATION)
 Title: {data['title']}
 Participant: {data['participant']}
 Rules: {data['rules'] or 'Complete the mission requirements as stated'}
+Mission Period: {data.get('start_date', 'N/A')} to {data.get('end_date', 'N/A')}
 Target Improvement: {data['target_pct']}%
 Reward: RM{data['reward']}"""
 
@@ -488,6 +489,8 @@ def run_ai_evaluation(mission, financial_setup, transactions, photo_diary: dict 
         "participant": getattr(mission, "participant_name", "Student"),
         "title": getattr(mission, "title", "Money Mission"),
         "rules": getattr(mission, "rules", "") or "",
+        "start_date": str(getattr(mission, "start_date", "")),
+        "end_date": str(getattr(mission, "end_date", "")),
         "reward": reward,
         "target_pct": target_pct,
         "passed": passed,

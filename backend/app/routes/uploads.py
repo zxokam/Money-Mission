@@ -87,17 +87,28 @@ def _clean_bank_text(raw: str) -> str:
         line = line.strip()
         if not line:
             continue
-        # Skip obvious non-transaction lines
         lower = line.lower()
+
+        # Always keep lines that have a monetary amount (date + description + amount pattern)
+        if _has_amount(line):
+            cleaned.append(line)
+            continue
+
+        # Skip obvious header/footer/metadata lines
         skip_words = [
             "page", "opening balance", "closing balance", "available balance",
             "statement", "account", "branch", "address", "phone", "fax",
-            "date", "description", "amount", "withdrawal", "deposit",
-            "balance brought", "balance carried", "total", "continued",
+            "balance brought", "balance carried", "continued",
             "this page", "subtotal", "www.", ".com", "customer", "hotline",
         ]
-        if any(w in lower for w in skip_words) and not _has_amount(line):
+        if any(w in lower for w in skip_words):
             continue
+
+        # Skip table header lines (only if they don't have amounts)
+        header_words = ["date", "description", "amount", "withdrawal", "deposit", "balance"]
+        if sum(1 for w in header_words if w in lower) >= 2:
+            continue
+
         cleaned.append(line)
 
     return "\n".join(cleaned)
@@ -109,11 +120,16 @@ def _has_amount(line: str) -> bool:
     return bool(re.search(r'(?:RM\s*)?\d[\d,]*(?:\.\d{2})', line))
 
 
-_BANK_STATEMENT_PROMPT = """You are a Malaysian bank statement parser. Extract ALL transactions from the text below.
+_BANK_STATEMENT_PROMPT = """You are a Malaysian bank statement parser. Extract ALL money-out transactions (debits/spending) from the text below. IGNORE credits (deposits, salary, payday, transfers in).
 
-For each transaction, return:
-- name: short description of what was purchased
-- amount: positive number (RM)
+CRITICAL — Amount sign convention:
+- Amounts with "-" or "DB" or "DEBIT" = money OUT (spending) → INCLUDE these as transactions
+- Amounts WITHOUT "-" or with "CR" or "CREDIT" = money IN (deposits, salary, transfers in) → IGNORE these completely, they are NOT transactions
+- Large deposits (RM1000+) are usually salary/payday — DO NOT include them
+
+For each money-out transaction, return:
+- name: short description of what was purchased or who was paid
+- amount: POSITIVE number (RM) — always positive even though the source shows negative
 - category: one of "Food", "Transport", "Shopping", "Entertainment", "Bills", "Subscription", "PayLater", "Others"
 - transactionDate: date in YYYY-MM-DD format
 
@@ -127,7 +143,7 @@ Common Malaysian transaction categories:
 - PayLater: SPayLater, Atome, Grab PayLater
 
 Respond with ONLY valid JSON array, no markdown, no extra text:
-[{{"name": "...", "amount": 12.50, "category": "Food", "transactionDate": "2026-05-15"}}, ...]"""
+[{{"name": "Mamak dinner", "amount": 12.50, "category": "Food", "transactionDate": "2026-05-15"}}, ...]"""
 
 
 def _clean_json_response(content: str) -> list[dict] | None:
@@ -277,7 +293,12 @@ async def _parse_pdf_with_vision(pdf_bytes: bytes) -> list[dict] | None:
     try:
         prompt = f"""{_BANK_STATEMENT_PROMPT}
 
-This is a scanned bank statement. Look at each transaction visible in the image(s) and extract all of them."""
+This is a scanned bank statement image. Look carefully at each row in the statement. For each row:
+1. Check the AMOUNT column — if it has a minus sign (-) or is in a "debit/withdrawal" column, it's a spending transaction → INCLUDE it
+2. If the amount has NO minus sign or is in a "credit/deposit" column, it's money coming in (deposit, salary, transfer) → IGNORE it
+3. Read the DESCRIPTION to categorize the spending
+4. Read the DATE column for the transaction date
+5. The BALANCE column shows running total — ignore it for extraction purposes"""
 
         content = [{"type": "text", "text": prompt}]
         for img in images:

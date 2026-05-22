@@ -66,7 +66,12 @@ def evaluate_mission(mission_id: int, body: EvaluateBody = EvaluateBody()):
 
     # Use defaults when financial setup is missing (works for both photo and bank missions)
     if not setup:
-        setup = {"expected_leftover": 0, "baseline_financial_score": 60, "monthly_income": 0, "required_expenses": 0}
+        setup = {
+            "expected_leftover": 0, "baseline_financial_score": 60, "monthly_income": 0,
+            "required_expenses": 0, "fixed_expenses": 0, "subscriptions": 0,
+            "paylater_commitments": 0, "average_food_per_day": 0, "transport_cost": 0,
+            "other_required_expenses": 0, "safe_daily_spending": 0,
+        }
 
     txs = db.list_transactions(mission_id)
 
@@ -111,6 +116,13 @@ def evaluate_mission(mission_id: int, body: EvaluateBody = EvaluateBody()):
         baseline_financial_score=setup.get("baseline_financial_score", 60),
         monthly_income=setup.get("monthly_income", 0),
         required_expenses=setup.get("required_expenses", 0),
+        fixed_expenses=setup.get("fixed_expenses", 0),
+        subscriptions=setup.get("subscriptions", 0),
+        paylater_commitments=setup.get("paylater_commitments", 0),
+        average_food_per_day=setup.get("average_food_per_day", 0),
+        transport_cost=setup.get("transport_cost", 0),
+        other_required_expenses=setup.get("other_required_expenses", 0),
+        safe_daily_spending=setup.get("safe_daily_spending", 0),
     )
     t_objs = []
     for t in txs:
