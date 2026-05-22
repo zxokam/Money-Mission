@@ -1,0 +1,514 @@
+import json
+from collections import defaultdict
+import httpx
+from ..config import GEMINI_API_KEY, DEEPSEEK_API_KEY, OPENAI_API_KEY
+from .scoring_service import calculate_financial_score
+
+NON_ESSENTIAL_CATEGORIES = {"Shopping", "Entertainment", "Others", "Food Delivery"}
+ESSENTIAL_CATEGORIES = {"Food", "Transport", "Bills", "Subscription", "PayLater"}
+
+CATEGORY_COLORS = {
+    "Food": "#10b981", "Transport": "#3b82f6", "Bills": "#f59e0b",
+    "Subscription": "#8b5cf6", "PayLater": "#ec4899", "Shopping": "#ef4444",
+    "Entertainment": "#f97316", "Others": "#6b7280",
+}
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+
+# ── Gemini AI ────────────────────────────────────────────────
+
+def _build_gemini_prompt(data: dict, photo_diary: dict = None) -> str:
+    """Build a structured prompt for AI evaluation of missions."""
+    mission_type = "PHOTO" if photo_diary else "BANK"
+
+    prompt = f"""You are a strict but fair mission evaluator for a Malaysian student challenge app called MoneyMission. Your job is to verify whether a participant has completed their mission according to the rules. Respond in JSON format only.
+
+═══════════════════════════════════
+MISSION DETAILS ({mission_type} VERIFICATION)
+═══════════════════════════════════
+Title: {data['title']}
+Participant: {data['participant']}
+Rules: {data['rules'] or 'Complete the mission requirements as stated'}
+Target Improvement: {data['target_pct']}%
+Reward: RM{data['reward']}"""
+
+    if photo_diary:
+        missed = photo_diary.get("missed_dates", [])
+        missed_str = ", ".join(missed) if missed else "None"
+        prompt += f"""
+
+═══════════════════════════════════
+PHOTO VERIFICATION — READ CAREFULLY
+═══════════════════════════════════
+Required subject: "{photo_diary.get('subject', 'N/A')}"
+Total days: {photo_diary.get('total', 0)}
+Photos uploaded: {photo_diary.get('uploaded', 0)}
+Compliance: {photo_diary.get('compliance_pct', 0)}%
+Missed dates: {missed_str}
+
+STEP 1: Look at each photo ONE BY ONE. For each photo, write down EXACTLY what objects you see. Be specific — "a clear glass containing transparent liquid on a wooden table" NOT just "water".
+
+STEP 2: Compare what you see to the required subject "{photo_diary.get('subject', 'N/A')}". Ask yourself: would a reasonable person looking at this photo agree it shows "{photo_diary.get('subject', 'N/A')}"?
+
+STEP 3: Decide verdict:
+- APPROVED only if the photo ACTUALLY DEPICTS "{photo_diary.get('subject', 'N/A')}"
+- REJECTED if the photo shows something else. DO NOT pretend a wrong object matches the subject.
+- If compliance < 50% → REJECTED for incomplete submission."""
+        # List photo URLs for text-only models as reference
+        if data.get("photo_urls"):
+            prompt += "\nPhoto URLs submitted:\n"
+            for i, u in enumerate(data["photo_urls"], 1):
+                prompt += f"  {i}. {u}\n"
+        prompt += "\n"""
+
+    else:
+        prompt += f"""
+
+═══════════════════════════════════
+BANK TRANSACTION VERIFICATION
+═══════════════════════════════════
+Total spending: RM{data['actual_spending']:.2f}
+Expected leftover: RM{data['expected_leftover']:.2f}
+Actual leftover: RM{data['actual_leftover']:.2f}
+Improvement: {data['improvement_pct']:+.1f}%
+Target: {data['target_pct']}%
+
+Spending breakdown:
+{data['cat_summary']}
+
+VERDICT RULES:
+- If improvement ({data['improvement_pct']:+.1f}%) meets or exceeds target ({data['target_pct']}%): APPROVED. The participant reduced spending successfully.
+- If improvement is below target: REJECTED. The participant did not cut spending enough.
+
+Income: RM{data['income']:.2f}. Required expenses: RM{data['required']:.2f}. The participant spent RM{data['actual_spending']:.2f} total."""
+
+
+    prompt += f"""
+
+═══════════════════════════════════
+YOUR RESPONSE
+═══════════════════════════════════
+Respond with this exact JSON (no markdown, no code fences, no extra text):
+{{"verdict": "approved" OR "rejected", "observed": "EXACTLY what objects you see in the photo(s). One sentence. Be specific. Example: 'Clear glass half-filled with transparent liquid, sitting on a wooden table.'", "reason": "Short sentence comparing observed contents to required subject '{photo_diary.get('subject', 'N/A') if photo_diary else 'financial target'}'. Example: 'Photo shows a glass of water which matches the subject.' or 'Photo shows a coffee mug, not water — mismatch.'", "explanation": "3-5 sentences. The FIRST sentence must describe what you observed in the photo. THEN judge whether it matches. TONE MUST MATCH verdict. APPROVED: warm, congratulate, mention RM reward. REJECTED: kind but clear about the mismatch, no congratulations or reward mention.", "recommendations": ["3 tips, each one sentence"]}}"""
+
+    return prompt
+
+
+def _call_gemini(data: dict, photo_diary: dict = None) -> dict | None:
+    """Call Gemini API. Returns dict with explanation and recommendations, or None on failure."""
+    if not GEMINI_API_KEY:
+        return None
+
+    prompt = _build_gemini_prompt(data, photo_diary)
+
+    try:
+        resp = httpx.post(
+            f"{GEMINI_URL}?key={GEMINI_API_KEY}",
+            json={
+                "contents": [{
+                    "parts": [{"text": prompt}]
+                }],
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 400,
+                },
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+
+        # Extract text from Gemini response
+        candidates = body.get("candidates", [])
+        if not candidates:
+            return None
+        text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+
+        # Parse JSON from response (strip any markdown code fences)
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+        if text.startswith("json"):
+            text = text[4:].strip()
+
+        result = json.loads(text)
+        if "explanation" not in result or "recommendations" not in result:
+            return None
+        return result
+
+    except Exception as e:
+        import traceback
+        print(f"Gemini API error: {e}")
+        traceback.print_exc()
+        return None
+
+
+# ── DeepSeek AI ──────────────────────────────────────────────
+
+DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
+
+
+def _call_deepseek(data: dict, photo_diary: dict = None) -> dict | None:
+    """Call DeepSeek API (OpenAI-compatible). Returns dict with explanation and recommendations, or None on failure."""
+    if not DEEPSEEK_API_KEY:
+        return None
+
+    prompt = _build_gemini_prompt(data, photo_diary)
+
+    try:
+        resp = httpx.post(
+            DEEPSEEK_URL,
+            headers={
+                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "deepseek-chat",
+                "messages": [
+                    {"role": "system", "content": "You are a friendly, motivational Malaysian financial coach for students. Always respond in valid JSON only — no markdown, no extra text."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 400,
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+
+        text = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        # Parse JSON from response (strip any markdown code fences)
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+        if text.startswith("json"):
+            text = text[4:].strip()
+
+        result = json.loads(text)
+        if "explanation" not in result or "recommendations" not in result:
+            return None
+        return result
+
+    except Exception as e:
+        import traceback
+        print(f"DeepSeek API error: {e}")
+        traceback.print_exc()
+        return None
+
+
+# ── OpenAI ─────────────────────────────────────────────────
+
+OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+
+
+def _call_openai(data: dict, photo_diary: dict = None, photo_urls: list = None) -> dict | None:
+    """Call OpenAI API. For photo missions with image URLs, uses vision to inspect photos."""
+    if not OPENAI_API_KEY:
+        return None
+
+    prompt = _build_gemini_prompt(data, photo_diary)
+
+    # Build message content — use vision format if photo URLs provided
+    if photo_urls and len(photo_urls) > 0:
+        content = [{"type": "text", "text": prompt}]
+        for url in photo_urls:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": url, "detail": "high"}
+            })
+        messages = [
+            {"role": "system", "content": "You are an honest Malaysian mission verifier. Look at each photo carefully. Describe what you actually see, then judge if it matches the required subject. Never lie about photo contents — if it doesn't match, reject it. If it matches, approve it. Respond in valid JSON only — no markdown, no extra text."},
+            {"role": "user", "content": content},
+        ]
+        max_tok = 800
+    else:
+        messages = [
+            {"role": "system", "content": "You are a friendly, motivational Malaysian financial coach for students. Always respond in valid JSON only — no markdown, no extra text."},
+            {"role": "user", "content": prompt},
+        ]
+        max_tok = 400
+
+    try:
+        resp = httpx.post(
+            OPENAI_URL,
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "gpt-4o",
+                "messages": messages,
+                "temperature": 0.3 if photo_urls else 0.7,
+                "max_tokens": max_tok,
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+
+        text = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+        if text.startswith("json"):
+            text = text[4:].strip()
+
+        result = json.loads(text)
+        if "explanation" not in result or "recommendations" not in result:
+            return None
+        return result
+
+    except Exception as e:
+        import traceback
+        print(f"OpenAI API error: {e}")
+        traceback.print_exc()
+        return None
+
+
+# ── Rule-based fallback ──────────────────────────────────────
+
+FALLBACK_TIPS = {
+    "Food": [
+        "Cook at home more — mamak is your best friend for cheap, filling meals under RM10.",
+        "Plan your grocery list weekly and stick to it. Impulse buys at Lotus's add up fast.",
+        "Try meal prepping: cook 3 days' worth at once. Your wallet (and future self) will thank you.",
+    ],
+    "Transport": [
+        "Carpool with friends or take public transit on non-urgent days.",
+        "Use Touch 'n Go eWallet reloads during promo periods for cashback.",
+        "Batch your errands into one trip. Fewer petrol runs = more money staying put.",
+    ],
+    "Shopping": [
+        "Uninstall Shopee for a week and watch your bank balance breathe.",
+        "Before buying, ask: 'Do I need this, or do I just want this?' Sleep on it.",
+        "Set a monthly 'fun money' limit of RM30-50 and track it religiously.",
+    ],
+    "Entertainment": [
+        "Swap paid streaming for free alternatives — YouTube and RTM have plenty.",
+        "Host a potluck instead of eating out. Friends bring food, you save cash.",
+        "Limit subscriptions to 1-2 you actually use daily. Cancel the rest.",
+    ],
+    "Subscription": [
+        "Audit your subscriptions: are you really watching Netflix AND Spotify Premium daily?",
+        "Share family plans with housemates — split costs, same benefits.",
+        "Downgrade to basic plans. iCloud 50GB is only RM3.90/month.",
+    ],
+    "Others": [
+        "Track every sen for a week. Small leaks (RM5 here, RM10 there) sink big ships.",
+        "Set a daily spending limit and check your balance every morning.",
+        "Build a tiny emergency fund first — even RM50/month creates breathing room.",
+    ],
+}
+
+FALLBACK_GENERIC = [
+    "Track every expense for one week — awareness alone can cut spending by 10-15%.",
+    "Set a daily spending cap and check your bank balance each morning.",
+    "Avoid impulse purchases before the mission end date. Every ringgit counts.",
+]
+
+
+def _classify_spending(cats: dict) -> tuple[float, float]:
+    essential = 0.0
+    non_essential = 0.0
+    for category, amount in cats.items():
+        if category in NON_ESSENTIAL_CATEGORIES:
+            non_essential += amount
+        else:
+            essential += amount
+    return essential, non_essential
+
+
+def _rule_based_explanation(passed: bool, improvement_pct: float, target_pct: float,
+                            participant_name: str, mission_title: str) -> str:
+    if passed:
+        return (
+            f"Mission PASSED! {participant_name} crushed the \"{mission_title}\" challenge, "
+            f"hitting a {improvement_pct:+.1f}% improvement and beating the {target_pct}% target. "
+            "Great discipline and smart choices made all the difference. "
+            "This kind of consistency is what builds real money habits!"
+        )
+    else:
+        shortfall = target_pct - improvement_pct
+        return (
+            f"Mission fell short — {participant_name} improved by {abs(improvement_pct):.1f}%, "
+            f"but the \"{mission_title}\" target was {target_pct}% (just {shortfall:.1f}% away). "
+            "So close! A few small tweaks and you'll nail it next time. "
+            "Every attempt teaches you something — don't give up!"
+        )
+
+
+def _rule_based_recommendations(passed: bool) -> list[str]:
+    if passed:
+        return [
+            "Keep up the great habits — consistency is your superpower.",
+            "Challenge yourself: set a slightly higher target next mission.",
+            "Share your strategy with a friend — teaching reinforces your own discipline.",
+        ]
+    else:
+        return FALLBACK_GENERIC[:3]
+
+
+# ── Main evaluation ──────────────────────────────────────────
+
+def run_ai_evaluation(mission, financial_setup, transactions, photo_diary: dict = None, photo_urls: list = None) -> dict:
+    income = financial_setup.monthly_income
+    required = financial_setup.required_expenses
+    expected_leftover = financial_setup.expected_leftover
+    target_pct = mission.target_improvement_percentage
+    reward = mission.reward_amount
+
+    actual_spending = sum(t.amount for t in transactions)
+    actual_leftover = income - actual_spending
+
+    improvement_pct = 0.0
+    if expected_leftover > 0:
+        improvement_pct = round(((actual_leftover - expected_leftover) / expected_leftover) * 100, 2)
+
+    passed = improvement_pct >= target_pct
+
+    # Category breakdown
+    cats = defaultdict(float)
+    for t in transactions:
+        cats[t.category] += t.amount
+
+    essential, non_essential = _classify_spending(cats)
+    top_cat = (max(cats, key=cats.get) if cats else "N/A")
+    top_amount = cats.get(top_cat, 0)
+
+    category_breakdown = [
+        {"category": c, "amount": round(a, 2), "color": CATEGORY_COLORS.get(c, "#6b7280")}
+        for c, a in sorted(cats.items(), key=lambda x: -x[1])
+    ]
+
+    # Financial health score
+    base_score = financial_setup.baseline_financial_score
+    health_score = calculate_financial_score(
+        actual_leftover=actual_leftover,
+        monthly_income=income,
+        required_expenses=required,
+        actual_total_spending=actual_spending,
+        expected_leftover=expected_leftover,
+    )
+
+    # Checks
+    passed_checks = [
+        {"label": "Improvement target met", "result": passed},
+        {"label": "Essential expenses covered", "result": actual_leftover > 0},
+        {"label": "No single category over 50% of spending",
+         "result": all(a < actual_spending * 0.5 for a in cats.values()) if actual_spending > 0 else True},
+        {"label": "Leftover ratio healthy (>10% of income)",
+         "result": (actual_leftover / income) >= 0.1 if income > 0 else False},
+        {"label": "Non-essential spending under control (<20% of income)",
+         "result": non_essential <= income * 0.2 if income > 0 else True},
+    ]
+
+    # Prepare data for Gemini
+    cat_summary = "\n".join(
+        f"  - {c}: RM{a:.0f}" for c, a in sorted(cats.items(), key=lambda x: -x[1])
+    )
+    checks_summary = "\n".join(
+        f"  - {'PASS' if c['result'] else 'FAIL'}: {c['label']}" for c in passed_checks
+    )
+
+    gemini_data = {
+        "participant": getattr(mission, "participant_name", "Student"),
+        "title": getattr(mission, "title", "Money Mission"),
+        "rules": getattr(mission, "rules", "") or "",
+        "reward": reward,
+        "target_pct": target_pct,
+        "passed": passed,
+        "is_photo_mission": photo_diary is not None,
+        "photo_urls": photo_urls or [],
+        "income": income,
+        "required": required,
+        "expected_leftover": expected_leftover,
+        "actual_spending": actual_spending,
+        "actual_leftover": actual_leftover,
+        "improvement_pct": improvement_pct,
+        "health_score": health_score,
+        "base_score": base_score,
+        "non_essential": non_essential,
+        "top_category": top_cat,
+        "top_amount": top_amount,
+        "cat_summary": cat_summary,
+        "checks_summary": checks_summary,
+    }
+
+    # Try OpenAI (with vision if photo_urls) → Gemini → DeepSeek → rule-based
+    ai = _call_openai(gemini_data, photo_diary, photo_urls) or _call_gemini(gemini_data, photo_diary) or _call_deepseek(gemini_data, photo_diary)
+    if ai:
+        explanation = ai["explanation"]
+        reason = ai.get("reason", "")
+        recommendations = ai["recommendations"]
+
+        # Verdict is decided BY THE AI COMMENT. Period.
+        # If the comment concludes the photo matches → Approved.
+        # If the comment concludes it doesn't match → Rejected.
+        expl = explanation.lower()
+        is_approved = any(w in expl for w in [
+            "well done", "great effort", "great job", "congratulations",
+            "earned the", "you've earned", "keep up", "successfully",
+            "matches", "clearly shows", "good habit", "excellent",
+            "passed", "approved", "mission complete",
+        ])
+        is_rejected = any(w in expl for w in [
+            "does not match", "doesn't match", "wrong subject",
+            "did not pass", "did not meet", "fell short", "failed",
+            "not accepted", "rejected", "does not show",
+        ])
+        passed = is_approved and not is_rejected
+    else:
+        explanation = _rule_based_explanation(
+            passed, improvement_pct, target_pct,
+            gemini_data["participant"], gemini_data["title"],
+        )
+        reason = ("All requirements met" if passed else "Did not meet requirements")
+        recommendations = _rule_based_recommendations(passed)
+
+    # Health history
+    health_history = [
+        {"month": m, "score": min(100, max(0, base_score + (i - 4) * 3 + (5 if i >= 4 else 0)))}
+        for i, m in enumerate(["Jan", "Feb", "Mar", "Apr", "May"])
+    ]
+    health_history[-1] = {"month": "May", "score": health_score}
+    score_change = health_score - base_score
+    health_history.append({
+        "month": "vs baseline",
+        "score": score_change,
+        "label": f"{'+' if score_change >= 0 else ''}{score_change} pts",
+    })
+
+    return {
+        "status": "completed" if passed else "failed",
+        "ai_verdict": "accepted" if passed else "rejected",
+        "expected_leftover": round(expected_leftover, 2),
+        "actual_total_spending": round(actual_spending, 2),
+        "actual_leftover": round(actual_leftover, 2),
+        "improvement_percentage": improvement_pct,
+        "target_improvement_percentage": target_pct,
+        "final_financial_score": health_score,
+        "score_change": score_change,
+        "reward_unlocked": passed,
+        "reward": reward if passed else 0,
+        "ai_explanation": explanation,
+        "reason": reason,
+        "verdict_reason": explanation,
+        "recommendations": recommendations,
+        "passed_checks": passed_checks,
+        "category_breakdown": category_breakdown,
+        "non_essential_spending": round(non_essential, 2),
+        "essential_spending": round(essential, 2),
+        "health_history": health_history,
+    }
