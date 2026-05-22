@@ -29,7 +29,13 @@ export default function Transactions() {
     setParsing(false);
 
     if (result?.transactions?.length > 0) {
-      setTxs(result.transactions.map((tx) => ({ ...tx, id: randomId() })));
+      const mapped = result.transactions.map((tx) => ({
+        ...tx,
+        id: randomId(),
+        date: tx.transactionDate || tx.date || "",
+        name: tx.name || tx.description || "",
+      }));
+      setTxs(mapped);
     } else {
       setParseError("AI could not extract transactions from this PDF. Make sure it's a text-based bank statement.");
     }

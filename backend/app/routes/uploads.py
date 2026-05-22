@@ -68,19 +68,22 @@ async def upload_bank_statement(file: UploadFile = File(...)):
 
 
 def _extract_pdf_text(pdf_bytes: bytes) -> str:
-    """Extract text from PDF bytes using pypdf."""
+    """Extract text from PDF bytes using pypdf with layout preservation."""
     from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(pdf_bytes))
     pages = []
     for page in reader.pages:
-        t = page.extract_text()
+        # Try layout mode first (preserves table structure better)
+        t = page.extract_text(extraction_mode="layout", layout_mode_space_vertically=False)
+        if not t:
+            t = page.extract_text()
         if t:
             pages.append(t)
-    return "\n".join(pages)
+    return "\n--- PAGE BREAK ---\n".join(pages)
 
 
 def _clean_bank_text(raw: str) -> str:
-    """Filter bank statement text to keep only transaction-like lines."""
+    """Lightly filter bank statement text — remove only obvious noise, keep transaction data for AI."""
     lines = raw.split("\n")
     cleaned = []
     for line in lines:
@@ -89,27 +92,31 @@ def _clean_bank_text(raw: str) -> str:
             continue
         lower = line.lower()
 
-        # Always keep lines that have a monetary amount (date + description + amount pattern)
+        # Always keep lines that have a monetary amount
         if _has_amount(line):
             cleaned.append(line)
             continue
 
-        # Skip obvious header/footer/metadata lines
+        # Keep lines that look like dates (standalone date headers in statements)
+        if re.search(r'\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}', line):
+            cleaned.append(line)
+            continue
+
+        # Skip obvious footer/metadata
         skip_words = [
             "page", "opening balance", "closing balance", "available balance",
             "statement", "account", "branch", "address", "phone", "fax",
             "balance brought", "balance carried", "continued",
             "this page", "subtotal", "www.", ".com", "customer", "hotline",
+            "confidential", "disclaimer", "terms and conditions",
         ]
         if any(w in lower for w in skip_words):
             continue
 
-        # Skip table header lines (only if they don't have amounts)
-        header_words = ["date", "description", "amount", "withdrawal", "deposit", "balance"]
-        if sum(1 for w in header_words if w in lower) >= 2:
-            continue
-
-        cleaned.append(line)
+        # Keep the line if it could be a continuation of a transaction description
+        # (has meaningful text, not just headers/whitespace)
+        if len(line) > 8 and not re.match(r'^[A-Z\s]{3,}$', line):
+            cleaned.append(line)
 
     return "\n".join(cleaned)
 
@@ -122,28 +129,33 @@ def _has_amount(line: str) -> bool:
 
 _BANK_STATEMENT_PROMPT = """You are a Malaysian bank statement parser. Extract ALL money-out transactions (debits/spending) from the text below. IGNORE credits (deposits, salary, payday, transfers in).
 
-CRITICAL — Amount sign convention:
-- Amounts with "-" or "DB" or "DEBIT" = money OUT (spending) → INCLUDE these as transactions
-- Amounts WITHOUT "-" or with "CR" or "CREDIT" = money IN (deposits, salary, transfers in) → IGNORE these completely, they are NOT transactions
-- Large deposits (RM1000+) are usually salary/payday — DO NOT include them
+The text comes from a PDF bank statement. Each transaction typically appears as a line or group of lines containing:
+- A DATE (like 15/05/2026, 2026-05-15, 15-05-2026, or 15 May 2026)
+- A DESCRIPTION (merchant name, transfer reference — may be truncated by the bank)
+- An AMOUNT (usually at the end of the line)
+- Sometimes a BALANCE column after the amount
 
-For each money-out transaction, return:
-- name: short description of what was purchased or who was paid
-- amount: POSITIVE number (RM) — always positive even though the source shows negative
-- category: one of "Food", "Transport", "Shopping", "Entertainment", "Bills", "Subscription", "PayLater", "Others"
-- transactionDate: date in YYYY-MM-DD format
+CRITICAL RULES:
+1. AMOUNT SIGN: If the amount has "-" or is marked "DB/DEBIT" → money OUT (spending). INCLUDE these.
+   If amount has NO minus or is marked "CR/CREDIT" → money IN (deposit/salary). IGNORE these.
+   Large credits (RM1000+) are usually salary — SKIP them entirely.
 
-Common Malaysian transaction categories:
-- Food: restaurants, mamak, GrabFood, FoodPanda, groceries, kopitiam
-- Transport: petrol, Touch n Go, Grab, MRT, parking, toll
-- Shopping: Shopee, Lazada, mall purchases, retail
-- Entertainment: Netflix, cinema, Spotify, Steam
-- Bills: TNB, SYABAS, phone bill, internet, rent
-- Subscription: Netflix, iCloud, Google, Spotify (recurring)
+2. DATES: Look for date patterns on each transaction line. If a date appears above a group of transactions, that date applies to all of them until a new date appears. Common formats: DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, DD Mon YYYY.
+
+3. NAMES: Use the FULL description as it appears — don't shorten it further. Bank statements often truncate names to ~20 characters; that's fine, keep what's there.
+
+4. CATEGORIZE based on the merchant/description:
+- Food: restaurants, mamak, cafe, kopitiam, GrabFood, FoodPanda, vending, delivery hero, catering
+- Transport: petrol, Touch n Go, Grab, MRT, parking, toll, bus
+- Shopping: Shopee, Lazada, TikTok Shop, mall, retail, mart
+- Entertainment: Netflix, cinema, Spotify, Steam, gaming
+- Bills: TNB, SYABAS, phone bill, internet, rent, utilities
+- Subscription: Netflix, iCloud, Google, Spotify (recurring payments)
 - PayLater: SPayLater, Atome, Grab PayLater
+- Others: transfers to individuals, DuitNow, IBG, anything not fitting above
 
 Respond with ONLY valid JSON array, no markdown, no extra text:
-[{{"name": "Mamak dinner", "amount": 12.50, "category": "Food", "transactionDate": "2026-05-15"}}, ...]"""
+[{"name": "MAMAK RESTAURANT", "amount": 12.50, "category": "Food", "transactionDate": "2026-05-15"}, ...]"""
 
 
 def _clean_json_response(content: str) -> list[dict] | None:
