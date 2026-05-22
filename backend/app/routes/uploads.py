@@ -44,15 +44,17 @@ async def upload_bank_statement(file: UploadFile = File(...)):
     if not contents:
         raise HTTPException(400, "Empty file")
 
-    # Step 1: Extract text from PDF
-    text = _extract_pdf_text(contents)
-    has_text = bool(text and text.strip())
+    # Step 1: Extract and clean text from PDF
+    raw_text = _extract_pdf_text(contents)
+    has_text = bool(raw_text and raw_text.strip())
 
-    # Step 2a: Try text-based parsing (OpenAI → DeepSeek)
+    # Step 2a: Try text-based parsing with cleaned text (OpenAI → DeepSeek)
     if has_text:
-        transactions = await _parse_transactions_with_ai(text)
-        if transactions:
-            return {"transactions": transactions, "method": "text", "raw_text_preview": text[:500]}
+        text = _clean_bank_text(raw_text)
+        if text and text.strip():
+            transactions = await _parse_transactions_with_ai(text)
+            if transactions:
+                return {"transactions": transactions, "method": "text", "raw_text_preview": text[:500]}
 
     # Step 2b: Try GPT-4o vision on embedded PDF images (scanned/image-based PDFs)
     vision_result = await _parse_pdf_with_vision(contents)
@@ -75,6 +77,36 @@ def _extract_pdf_text(pdf_bytes: bytes) -> str:
         if t:
             pages.append(t)
     return "\n".join(pages)
+
+
+def _clean_bank_text(raw: str) -> str:
+    """Filter bank statement text to keep only transaction-like lines."""
+    lines = raw.split("\n")
+    cleaned = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        # Skip obvious non-transaction lines
+        lower = line.lower()
+        skip_words = [
+            "page", "opening balance", "closing balance", "available balance",
+            "statement", "account", "branch", "address", "phone", "fax",
+            "date", "description", "amount", "withdrawal", "deposit",
+            "balance brought", "balance carried", "total", "continued",
+            "this page", "subtotal", "www.", ".com", "customer", "hotline",
+        ]
+        if any(w in lower for w in skip_words) and not _has_amount(line):
+            continue
+        cleaned.append(line)
+
+    return "\n".join(cleaned)
+
+
+def _has_amount(line: str) -> bool:
+    """Check if a line contains a monetary amount (RM or decimal number)."""
+    # Matches: 123.45, 1,234.56, RM123.45, RM 123.45, -123.45
+    return bool(re.search(r'(?:RM\s*)?\d[\d,]*(?:\.\d{2})', line))
 
 
 _BANK_STATEMENT_PROMPT = """You are a Malaysian bank statement parser. Extract ALL transactions from the text below.
