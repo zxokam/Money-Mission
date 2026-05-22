@@ -64,12 +64,9 @@ def evaluate_mission(mission_id: int, body: EvaluateBody = EvaluateBody()):
     setup = db.get_financial_setup(mission_id)
     photo_diary = body.photo_diary
 
-    # Photo missions don't need financial setup — use defaults
-    if photo_diary and not setup:
-        setup = {"expected_leftover": 0, "baseline_financial_score": 60, "monthly_income": 0, "required_expenses": 0}
-
+    # Use defaults when financial setup is missing (works for both photo and bank missions)
     if not setup:
-        raise HTTPException(400, "Financial setup required before evaluation")
+        setup = {"expected_leftover": 0, "baseline_financial_score": 60, "monthly_income": 0, "required_expenses": 0}
 
     txs = db.list_transactions(mission_id)
 

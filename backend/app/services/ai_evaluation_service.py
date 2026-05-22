@@ -63,7 +63,10 @@ STEP 3: Decide verdict:
         prompt += "\n"""
 
     else:
-        prompt += f"""
+        has_budget = data['income'] > 0
+
+        if has_budget:
+            prompt += f"""
 
 ═══════════════════════════════════
 PARTICIPANT'S BUDGET SETUP
@@ -77,7 +80,9 @@ Transport Cost: RM{data['transport_cost']:.2f}
 Other Required Expenses: RM{data['other_expenses']:.2f}
 Total Required Expenses: RM{data['required']:.2f}
 Expected Leftover (after expenses): RM{data['expected_leftover']:.2f}
-Safe Daily Spending Limit: RM{data['safe_daily_spending']:.2f}
+Safe Daily Spending Limit: RM{data['safe_daily_spending']:.2f}"""
+
+        prompt += f"""
 
 ═══════════════════════════════════
 ACTUAL SPENDING RESULTS
@@ -88,7 +93,10 @@ Improvement: {data['improvement_pct']:+.1f}% (Target: {data['target_pct']}%)
 Baseline Financial Score: {data['base_score']}/100 → New Score: {data['health_score']}/100
 
 Spending breakdown by category:
-{data['cat_summary']}
+{data['cat_summary']}"""
+
+        if has_budget:
+            prompt += f"""
 
 STEP 1: Compare their actual spending against their budget. For each category, check if they overspent relative to their planned budget. Be specific — "Food spending of RM450 exceeds their planned RM{data['avg_food_per_day'] * 30:.0f}/month food budget by RM{450 - data['avg_food_per_day'] * 30:.0f}" NOT just "spent on food".
 
@@ -99,6 +107,18 @@ STEP 3: Compare actual leftover (RM{data['actual_leftover']:.2f}) against expect
 STEP 4: Decide verdict:
 - APPROVED: If improvement ({data['improvement_pct']:+.1f}%) meets or exceeds target ({data['target_pct']}%). They reduced spending successfully.
 - REJECTED: If improvement is below target. But acknowledge ANY positive improvement — even 2% better is progress."""
+        else:
+            prompt += f"""
+
+STEP 1: Analyze their actual spending patterns. Look at where money is going — which categories dominate? Is spending balanced?
+
+STEP 2: Identify non-essential spending (Shopping, Entertainment, Food Delivery). What percentage of total spending is discretionary vs necessary?
+
+STEP 3: Look for any red flags: large single transactions, PayLater usage indicating debt, unusual patterns.
+
+STEP 4: Decide verdict:
+- APPROVED: If spending looks reasonable for a student — mostly essentials, limited splurging. The total spending of RM{data['actual_spending']:.2f} is the key number to judge.
+- REJECTED: If there's excessive non-essential spending, debt signals, or spending far exceeds typical student budget (~RM1500-2000/month)."""
 
 
     if photo_diary:
@@ -109,7 +129,7 @@ YOUR RESPONSE
 ═══════════════════════════════════
 Respond with this exact JSON (no markdown, no code fences, no extra text):
 {{"verdict": "approved" OR "rejected", "observed": "EXACTLY what objects you see in the photo(s). One sentence. Be specific. Example: 'Clear glass half-filled with transparent liquid, sitting on a wooden table.'", "reason": "Short sentence comparing observed contents to required subject '{photo_diary.get('subject', 'N/A')}'. Example: 'Photo shows a glass of water which matches the subject.' or 'Photo shows a coffee mug, not water — mismatch.'", "explanation": "3-5 sentences. The FIRST sentence must describe what you observed in the photo. THEN judge whether it matches. TONE MUST MATCH verdict. APPROVED: warm, congratulate, mention RM reward. REJECTED: kind but clear about the mismatch, no congratulations or reward mention.", "recommendations": ["3 tips, each one sentence"]}}"""
-    else:
+    elif data['income'] > 0:
         prompt += f"""
 
 ═══════════════════════════════════
@@ -117,6 +137,14 @@ YOUR RESPONSE
 ═══════════════════════════════════
 Respond with this exact JSON (no markdown, no code fences, no extra text):
 {{"verdict": "approved" OR "rejected", "observed": "EXACTLY what spending patterns you notice. One sentence. Be specific. Example: 'Participant spent RM450.30 total across Food (RM180.50), Transport (RM120.00), and Shopping (RM149.80), leaving RM249.70 from RM700.00 income.'", "reason": "Short sentence comparing actual improvement ({data['improvement_pct']:+.1f}%) to target ({data['target_pct']}%). Example: 'Improvement of 15.3% exceeds the 10% target — mission passed.' or 'Improvement of only 3.2% falls short of the 10% target.'", "explanation": "3-5 sentences. The FIRST sentence must describe what you observed in the spending breakdown — mention the top spending categories and whether the participant saved. THEN judge whether they hit their target. TONE MUST MATCH verdict. APPROVED: warm, congratulate, mention RM{data['reward']} reward. REJECTED: kind but clear about the shortfall, no congratulations or reward mention.", "recommendations": ["3 tips, each one sentence related to the top spending categories"]}}"""
+    else:
+        prompt += f"""
+
+═══════════════════════════════════
+YOUR RESPONSE
+═══════════════════════════════════
+Respond with this exact JSON (no markdown, no code fences, no extra text):
+{{"verdict": "approved" OR "rejected", "observed": "EXACTLY what spending patterns you notice. One sentence summarizing total spending and top categories. Be specific. Example: 'Participant spent RM1,234.50 total across Food (RM450.00), Transport (RM320.00), Shopping (RM280.50), and other categories.'", "reason": "One sentence judging whether this spending pattern looks healthy for a student. Example: 'Spending is mostly on essentials with moderate discretionary purchases — looks reasonable.' or 'High non-essential spending on Shopping and Entertainment signals poor money management.'", "explanation": "3-5 sentences. Describe the spending breakdown you observed — top categories, essential vs non-essential split, any red flags. THEN give your verdict on whether this looks financially healthy. TONE: friendly, motivational Malaysian coach style. APPROVED: warm, congratulate on good habits. REJECTED: kind but clear about overspending, no congratulations.", "recommendations": ["3 tips, each one sentence related to the top spending categories"]}}"""
 
     return prompt
 
@@ -401,8 +429,15 @@ def run_ai_evaluation(mission, financial_setup, transactions, photo_diary: dict 
     improvement_pct = 0.0
     if expected_leftover > 0:
         improvement_pct = round(((actual_leftover - expected_leftover) / expected_leftover) * 100, 2)
+    elif income > 0:
+        # No expected leftover set, but we have income — use actual_leftover/income ratio
+        improvement_pct = round((actual_leftover / income) * 100, 2)
 
-    passed = improvement_pct >= target_pct
+    # When no budget data at all, judge purely on spending vs typical student budget
+    if income <= 0:
+        passed = actual_spending < 2000  # Reasonable student monthly spend
+    else:
+        passed = improvement_pct >= target_pct
 
     # Category breakdown
     cats = defaultdict(float)
@@ -428,16 +463,17 @@ def run_ai_evaluation(mission, financial_setup, transactions, photo_diary: dict 
         expected_leftover=expected_leftover,
     )
 
-    # Checks
+    # Checks (adapt for missing budget)
+    has_budget = income > 0
     passed_checks = [
         {"label": "Improvement target met", "result": passed},
-        {"label": "Essential expenses covered", "result": actual_leftover > 0},
+        {"label": "Essential expenses covered", "result": actual_leftover > 0 if has_budget else actual_spending < 2000},
         {"label": "No single category over 50% of spending",
          "result": all(a < actual_spending * 0.5 for a in cats.values()) if actual_spending > 0 else True},
         {"label": "Leftover ratio healthy (>10% of income)",
-         "result": (actual_leftover / income) >= 0.1 if income > 0 else False},
-        {"label": "Non-essential spending under control (<20% of income)",
-         "result": non_essential <= income * 0.2 if income > 0 else True},
+         "result": (actual_leftover / income) >= 0.1 if has_budget else (actual_spending < 2000)},
+        {"label": "Non-essential spending under control",
+         "result": non_essential <= income * 0.2 if has_budget else non_essential < 500},
     ]
 
     # Prepare data for Gemini
