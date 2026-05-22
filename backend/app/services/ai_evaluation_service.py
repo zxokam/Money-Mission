@@ -137,10 +137,10 @@ def _call_gemini(data: dict, photo_diary: dict = None) -> dict | None:
                 }],
                 "generationConfig": {
                     "temperature": 0.7,
-                    "maxOutputTokens": 400,
+                    "maxOutputTokens": 800,
                 },
             },
-            timeout=20,
+            timeout=30,
         )
         resp.raise_for_status()
         body = resp.json()
@@ -199,9 +199,9 @@ def _call_deepseek(data: dict, photo_diary: dict = None) -> dict | None:
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.7,
-                "max_tokens": 400,
+                "max_tokens": 800,
             },
-            timeout=20,
+            timeout=30,
         )
         resp.raise_for_status()
         body = resp.json()
@@ -254,13 +254,13 @@ def _call_openai(data: dict, photo_diary: dict = None, photo_urls: list = None) 
             {"role": "system", "content": "You are an honest Malaysian mission verifier. Look at each photo carefully. Describe what you actually see, then judge if it matches the required subject. Never lie about photo contents — if it doesn't match, reject it. If it matches, approve it. Respond in valid JSON only — no markdown, no extra text."},
             {"role": "user", "content": content},
         ]
-        max_tok = 800
+        max_tok = 1500
     else:
         messages = [
             {"role": "system", "content": "You are a friendly, motivational Malaysian financial coach for students. Always respond in valid JSON only — no markdown, no extra text."},
             {"role": "user", "content": prompt},
         ]
-        max_tok = 400
+        max_tok = 800
 
     try:
         resp = httpx.post(
