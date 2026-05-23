@@ -71,6 +71,19 @@ export function AppProvider({ children }) {
 
   const [user, setUser] = useState(() => getCurrentUser());
 
+  // Load saved burnout prediction from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("burnoutPrediction");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.burnoutDay) {
+          dispatch({ type: "SET_BURNOUT", prediction: parsed });
+        }
+      }
+    } catch {}
+  }, []);
+
   const loadUserData = useCallback(async (userId) => {
     const data = await getDashboard(userId).catch(() => ({ settings: null, my_missions: null }));
     const { settings, my_missions } = data;
@@ -83,6 +96,10 @@ export function AppProvider({ children }) {
           healthScore: settings.healthScore || 60,
         },
       });
+      if (settings.burnoutPrediction) {
+        dispatch({ type: "SET_BURNOUT", prediction: settings.burnoutPrediction });
+        try { localStorage.setItem("burnoutPrediction", JSON.stringify(settings.burnoutPrediction)); } catch {}
+      }
     }
     dispatch({
       type: "LOAD_MY_MISSIONS",
@@ -127,6 +144,8 @@ export function AppProvider({ children }) {
     doLogout();
     dispatch({ type: "LOAD_MY_MISSIONS", missions: [] });
     dispatch({ type: "UPDATE_BUDGET", budget: demoBaseline });
+    dispatch({ type: "SET_BURNOUT", prediction: null });
+    try { localStorage.removeItem("burnoutPrediction"); } catch {}
     setUser(null);
   }, []);
 
@@ -139,7 +158,10 @@ export function AppProvider({ children }) {
     dispatch({ type: "CANCEL_MISSION", missionId });
   }, [user]);
   const updateBudget = (budget) => dispatch({ type: "UPDATE_BUDGET", budget });
-  const setBurnoutPrediction = (prediction) => dispatch({ type: "SET_BURNOUT", prediction });
+  const setBurnoutPrediction = (prediction) => {
+    dispatch({ type: "SET_BURNOUT", prediction });
+    try { localStorage.setItem("burnoutPrediction", JSON.stringify(prediction)); } catch {}
+  };
 
   return (
     <AppContext.Provider value={{ ...state, user, login, logout, acceptMission, loadMyMissions, cancelMission, updateBudget, setBurnoutPrediction }}>

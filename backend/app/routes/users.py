@@ -54,12 +54,20 @@ def get_dashboard(user_id: int):
         my_missions = fut_my.result()
         available = fut_avail.result()
 
-    settings = {"income": 0, "safeDailyLimit": 0, "healthScore": 60}
+    settings = {"income": 0, "safeDailyLimit": 0, "healthScore": 60, "burnoutPrediction": None}
     if s:
+        burnout = None
+        raw_burnout = s.get("burnout_prediction")
+        if raw_burnout:
+            try:
+                burnout = json.loads(raw_burnout) if isinstance(raw_burnout, str) else raw_burnout
+            except Exception:
+                pass
         settings = {
             "income": s.get("monthly_income", 0),
             "safeDailyLimit": s.get("safe_daily_spending", 0),
             "healthScore": s.get("baseline_financial_score", 60),
+            "burnoutPrediction": burnout,
         }
 
     def fmt(m):
@@ -101,10 +109,18 @@ def get_user_settings(user_id: int):
     s = db.get_user_settings(user_id)
     if not s:
         return {"income": 0, "safeDailyLimit": 0, "healthScore": 60}
+    burnout = None
+    raw_burnout = s.get("burnout_prediction")
+    if raw_burnout:
+        try:
+            burnout = json.loads(raw_burnout) if isinstance(raw_burnout, str) else raw_burnout
+        except Exception:
+            pass
     return {
         "income": s.get("monthly_income", 0),
         "safeDailyLimit": s.get("safe_daily_spending", 0),
         "healthScore": s.get("baseline_financial_score", 60),
+        "burnoutPrediction": burnout,
         "raw": s,
     }
 
@@ -306,6 +322,13 @@ async def predict_spending(user_id: int, files: list[UploadFile] = File(...)):
     if not ai_result:
         # Rule-based fallback
         ai_result = _rule_based_prediction(all_months)
+
+    # Save prediction to DB so it persists and shows on dashboard
+    if ai_result:
+        try:
+            db.upsert_user_settings(user_id, {"burnout_prediction": json.dumps(ai_result)})
+        except Exception:
+            pass
 
     return {
         "prediction": ai_result,

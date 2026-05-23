@@ -18,7 +18,7 @@ export default function Dashboard() {
   const [tick, setTick] = useState(0);
   const navigate = useNavigate();
   const location = useLocation();
-  const { activeMissions, budget, cancelMission, user, loadMyMissions, updateBudget, burnoutPrediction } = useApp();
+  const { activeMissions, budget, cancelMission, user, loadMyMissions, updateBudget, burnoutPrediction, setBurnoutPrediction } = useApp();
   const [dismissBurnout, setDismissBurnout] = useState(false);
 
   const handleCancel = async (missionId) => {
@@ -36,6 +36,9 @@ export default function Dashboard() {
           safeDailyLimit: settings.safeDailyLimit || 0,
           healthScore: settings.healthScore || 60,
         });
+        if (settings.burnoutPrediction) {
+          setBurnoutPrediction(settings.burnoutPrediction);
+        }
       }
       const mapMission = (m) => ({
         id: m.id,
