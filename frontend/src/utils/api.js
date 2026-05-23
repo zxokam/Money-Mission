@@ -123,3 +123,15 @@ export const uploadReceipt = async (file) => {
     return null;
   }
 };
+
+export const predictBurnout = async (userId, files) => {
+  try {
+    const form = new FormData();
+    files.forEach((f) => form.append("files", f));
+    const r = await fetch(`${BASE}/api/users/${userId}/spending-prediction`, { method: "POST", body: form });
+    if (!r.ok) return null;
+    return r.json();
+  } catch {
+    return null;
+  }
+};
