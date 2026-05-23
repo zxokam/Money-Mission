@@ -2,6 +2,8 @@
 
 Social finance challenges. Create missions, track spending, prove progress — AI verifies everything. Built for Malaysian students.
 
+**Live:** [ahmedzaid.xyz](https://ahmedzaid.xyz)
+
 ## How It Works
 
 1. **Set your budget** — income, fixed expenses, subscriptions. AI computes your safe daily spending limit and financial health score.
