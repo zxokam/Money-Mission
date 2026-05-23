@@ -1,11 +1,11 @@
+import os
 import psycopg2
 
-# Try Supabase connection pooler (Session mode, port 6543)
-dsns = [
-    "postgresql://postgres.kgcwknyznvnixpxonfov:Zkamilan2233@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres",
-    "postgresql://postgres.kgcwknyznvnixpxonfov:Zkamilan2233@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres",
-    "postgresql://postgres:Zkamilan2233@db.kgcwknyznvnixpxonfov.supabase.co:5432/postgres?sslmode=require",
-]
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+if not DATABASE_URL:
+    raise RuntimeError("Missing DATABASE_URL environment variable")
+
+dsns = [DATABASE_URL]
 
 for i, dsn in enumerate(dsns):
     print(f"Trying DSN {i+1}: {dsn[:80]}...")

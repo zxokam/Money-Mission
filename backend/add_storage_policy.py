@@ -1,6 +1,11 @@
+import os
 import psycopg2
 
-conn = psycopg2.connect('postgresql://postgres:Zkamilan2233@db.kgcwknyznvnixpxonfov.supabase.co:5432/postgres')
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+if not DATABASE_URL:
+    raise RuntimeError("Missing DATABASE_URL environment variable")
+
+conn = psycopg2.connect(DATABASE_URL)
 conn.autocommit = True
 cur = conn.cursor()
 

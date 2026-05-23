@@ -1,10 +1,13 @@
+import os
 import urllib.request
 import json
 
-SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtnY3drbnl6bnZuaXhweG9uZm92Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3OTAwMDg3MiwiZXhwIjoyMDk0NTc2ODcyfQ.1UC_eQZvjj4sn1x1srbksGiO4HPUa4v0cLoai1Ax3WU"
-ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtnY3drbnl6bnZuaXhweG9uZm92Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMDA4NzIsImV4cCI6MjA5NDU3Njg3Mn0.pABWghS3BKhCBxbJQdz7u0JZTk8onO_EzZpxoJjHIFc"
+SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+BASE = os.environ.get("SUPABASE_URL", "")
 
-BASE = "https://kgcwknyznvnixpxonfov.supabase.co"
+if not SERVICE_KEY or not ANON_KEY or not BASE:
+    raise RuntimeError("Missing SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY, or SUPABASE_URL environment variables")
 
 # Test: Upload using supabase-js style headers (mimicking the frontend exactly)
 print("=== Test 1: Upload with anon key (like frontend) ===")

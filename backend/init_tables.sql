@@ -1,4 +1,4 @@
--- Run this in Supabase SQL Editor (https://kgcwknyznvnixpxonfov.supabase.co)
+-- Run this in your Supabase SQL Editor
 -- Go to: SQL Editor → New Query → Paste → Run
 
 CREATE TABLE IF NOT EXISTS users (
