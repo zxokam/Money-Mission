@@ -178,17 +178,23 @@ _SPENDING_PREDICTION_PROMPT = """You are a financial pattern analyst for a Malay
 
 You are given transaction data from {month_count} different months of bank statements. Each month's data includes all money-out transactions (debits/spending only — deposits and salary are already excluded).
 
+Each month also includes a RAW TEXT SNIPPET from the bank statement PDF. Use this to find the CLOSING BALANCE (ending balance, "baki akhir", or final balance) for that month. Look for numbers near labels like "Baki", "Balance", "Closing", "Baki Akhir", "Ending Balance" in the raw text.
+
 Your job:
 1. Find PATTERNS — which dates of the month does spending spike? (e.g., "The 1st-3rd always have large transactions — likely rent/bills")
 2. Find TRENDS — is spending going up or down across months? Which categories are growing?
 3. Predict BURNOUT DATE — based on spending rate, estimate which day of a typical month they run out of money
-4. Give 3 personalized, actionable tips based on their actual spending data
+4. Find LAST BALANCE — from the raw text snippets, extract the closing balance of the MOST RECENT month. This is a single number in RM (e.g. 1340.50). If you can't find it, estimate it based on total debits for that month.
+5. Give 3 personalized, actionable tips based on their actual spending data
 
 SPENDING DATA ACROSS {month_count} MONTHS:
 {transactions_data}
 
+RAW TEXT SNIPPETS FROM PDFs:
+{raw_text_snippets}
+
 Respond with ONLY valid JSON, no markdown, no extra text:
-{{"highSpendDates": ["1st-3rd (bills/rent)", "15th (payday spending)", "25th-28th (running low)"], "burnoutRisk": "You typically run through 70% of your money by the 22nd of the month", "burnoutDay": 22, "categoryTrends": [{{"category": "Food", "trend": "up", "avgMonthly": 450, "detail": "Food spending increased 15% from Month 1 to Month 2"}}], "overallTrend": "Your total spending is trending upward (+8% month over month). Shopping is the fastest growing category.", "tips": ["Tip 1 based on their actual data", "Tip 2", "Tip 3"], "summary": "2-3 sentence overview of financial health across months"}}"""
+{{"highSpendDates": ["1st-3rd (bills/rent)", "15th (payday spending)", "25th-28th (running low)"], "burnoutRisk": "You typically run through 70% of your money by the 22nd of the month", "burnoutDay": 22, "lastBalance": 1340.50, "categoryTrends": [{{"category": "Food", "trend": "up", "avgMonthly": 450, "detail": "Food spending increased 15% from Month 1 to Month 2"}}], "overallTrend": "Your total spending is trending upward (+8% month over month). Shopping is the fastest growing category.", "tips": ["Tip 1 based on their actual data", "Tip 2", "Tip 3"], "summary": "2-3 sentence overview of financial health across months"}}"""
 
 
 async def _call_ai_for_prediction(prompt: str) -> dict | None:
@@ -295,6 +301,7 @@ async def predict_spending(user_id: int, files: list[UploadFile] = File(...)):
             "filename": file.filename,
             "transactionCount": len(transactions) if transactions else 0,
             "transactions": transactions or [],
+            "raw_text": (raw_text or "")[:2000] if has_text else "",
         })
 
     # Check we have enough data
@@ -304,6 +311,7 @@ async def predict_spending(user_id: int, files: list[UploadFile] = File(...)):
 
     # Build prompt with all months' transactions
     tx_parts = []
+    raw_parts = []
     for m in all_months:
         tx_parts.append(f"\n─── {m['label']} ({m['filename']}) ───")
         if m["transactions"]:
@@ -311,10 +319,13 @@ async def predict_spending(user_id: int, files: list[UploadFile] = File(...)):
                 tx_parts.append(f"  {t.get('transactionDate', '?')} | {t.get('name', '?')} | RM{t.get('amount', 0):.2f} | {t.get('category', 'Others')}")
         else:
             tx_parts.append("  (No transactions extracted)")
+        if m.get("raw_text"):
+            raw_parts.append(f"\n─── {m['label']} ({m['filename']}) ───\n{m['raw_text'][:1500]}")
 
     prompt = _SPENDING_PREDICTION_PROMPT.format(
         month_count=len(all_months),
         transactions_data="\n".join(tx_parts)[:10000],
+        raw_text_snippets="\n".join(raw_parts)[:4000] if raw_parts else "(No raw text available)",
     )
 
     ai_result = await _call_ai_for_prediction(prompt)
@@ -322,6 +333,12 @@ async def predict_spending(user_id: int, files: list[UploadFile] = File(...)):
     if not ai_result:
         # Rule-based fallback
         ai_result = _rule_based_prediction(all_months)
+
+    # Try to extract last balance from raw text if AI didn't provide one
+    if ai_result and not ai_result.get("lastBalance"):
+        extracted = _extract_balance_from_raw(all_months)
+        if extracted:
+            ai_result["lastBalance"] = extracted
 
     # Save prediction to DB so it persists and shows on dashboard
     if ai_result:
@@ -336,6 +353,35 @@ async def predict_spending(user_id: int, files: list[UploadFile] = File(...)):
     }
 
 
+def _extract_balance_from_raw(months: list) -> float | None:
+    """Try to extract closing balance from raw PDF text using regex patterns."""
+    import re
+    if not months:
+        return None
+    # Check the last (most recent) month first
+    last_month = months[-1]
+    raw = last_month.get("raw_text", "")
+    if not raw:
+        return None
+
+    patterns = [
+        r'(?:Baki\s*(?:Akhir|Terkini)?|Closing\s*Balance|Ending\s*Balance|Balance\s*(?:c/f|carried?\s*forward))[:\s]*RM?\s*([\d,]+\.?\d*)',
+        r'(?:Baki\s*(?:Akhir|Terkini)?)[:\s]*RM?\s*([\d,]+\.?\d*)',
+        r'(?:Closing|Ending)\s*Balance[:\s]*RM?\s*([\d,]+\.?\d*)',
+        r'RM\s*([\d,]+\.?\d{2})\s*\n?\s*$',  # Last RM amount on a line near end
+    ]
+    for pat in patterns:
+        matches = re.findall(pat, raw, re.IGNORECASE)
+        if matches:
+            # Take the last match (closest to end of statement)
+            val = matches[-1].replace(",", "")
+            try:
+                return float(val)
+            except ValueError:
+                continue
+    return None
+
+
 def _rule_based_prediction(months: list) -> dict:
     """Fallback prediction when AI is unavailable."""
     total = sum(m["transactionCount"] for m in months)
@@ -348,11 +394,15 @@ def _rule_based_prediction(months: list) -> dict:
             all_cats[cat] = all_cats.get(cat, 0) + t.get("amount", 0)
 
     top_cats = sorted(all_cats.items(), key=lambda x: -x[1])[:3]
+    # Try to extract balance from raw text
+    extracted_balance = _extract_balance_from_raw(months)
+    last_balance = extracted_balance if extracted_balance else round(sum(t.get("amount", 0) for t in months[-1].get("transactions", [])), 2) if months else 0
 
     return {
         "highSpendDates": ["1st-5th (start of month bills)", "15th-20th (mid-month)", "25th-31st (end of month)"],
         "burnoutRisk": f"Based on {total} transactions across {len(months)} months, track your spending daily to avoid running out.",
         "burnoutDay": 20,
+        "lastBalance": last_balance,
         "categoryTrends": [{"category": c, "trend": "steady", "avgMonthly": round(a / len(months), 2), "detail": f"RM{a:.2f} total across {len(months)} months"} for c, a in top_cats],
         "overallTrend": f"Analyzed {total} transactions across {len(months)} months. Set up your budget in the section above for more accurate predictions.",
         "tips": ["Track daily spending against your safe daily limit", "Review subscriptions — cancel unused ones", "Set aside money for bills right after payday"],

@@ -211,7 +211,9 @@ export default function LandingPage() {
                   </div>
                   <div className="bg-white/[0.03] rounded-xl p-2.5">
                     <span className="text-white/25 block text-[9px] uppercase tracking-wider">Last Balance</span>
-                    <span className="text-white/70 font-semibold text-xs">RM{(() => { const bal = (ctx.budget?.income || 0) - (ctx.budget?.safeDailyLimit || 0) * 30; return bal > 0 ? bal.toFixed(0) : 0; })()}</span>
+                    <span className="text-white/70 font-semibold text-xs">
+                      {burnoutPrediction?.lastBalance ? `RM${Number(burnoutPrediction.lastBalance).toFixed(0)}` : "—"}
+                    </span>
                   </div>
                   <div className="bg-white/[0.03] rounded-xl p-2.5">
                     <span className="text-white/25 block text-[9px] uppercase tracking-wider">Runway</span>
