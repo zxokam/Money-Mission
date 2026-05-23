@@ -15,6 +15,7 @@ function fmtLocal(d) {
 const initialState = {
   activeMissions: [],
   budget: null,
+  burnoutPrediction: null,
 };
 
 function reducer(state, action) {
@@ -55,6 +56,8 @@ function reducer(state, action) {
       return { ...state, activeMissions: state.activeMissions.filter((m) => m.id !== action.missionId) };
     case "UPDATE_BUDGET":
       return { ...state, budget: action.budget };
+    case "SET_BURNOUT":
+      return { ...state, burnoutPrediction: action.prediction };
     default:
       return state;
   }
@@ -136,9 +139,10 @@ export function AppProvider({ children }) {
     dispatch({ type: "CANCEL_MISSION", missionId });
   }, [user]);
   const updateBudget = (budget) => dispatch({ type: "UPDATE_BUDGET", budget });
+  const setBurnoutPrediction = (prediction) => dispatch({ type: "SET_BURNOUT", prediction });
 
   return (
-    <AppContext.Provider value={{ ...state, user, login, logout, acceptMission, loadMyMissions, cancelMission, updateBudget }}>
+    <AppContext.Provider value={{ ...state, user, login, logout, acceptMission, loadMyMissions, cancelMission, updateBudget, setBurnoutPrediction }}>
       {children}
     </AppContext.Provider>
   );

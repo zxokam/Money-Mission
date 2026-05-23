@@ -6,7 +6,7 @@ import { getUserSettings, saveUserSettings, predictBurnout } from "../utils/api"
 const empty = { income: "", fixedExpenses: "", subscriptions: "", payLater: "", foodPerDay: "", transport: "", otherExpenses: "" };
 
 export default function FinancialSetup() {
-  const { budget, updateBudget, user } = useApp();
+  const { budget, updateBudget, user, setBurnoutPrediction } = useApp();
   const navigate = useNavigate();
 
   const fileRef = useRef(null);
@@ -110,6 +110,7 @@ export default function FinancialSetup() {
     setAnalyzing(false);
     if (result?.prediction) {
       setPrediction(result.prediction);
+      setBurnoutPrediction(result.prediction);
       if (result.months) {
         setPrediction((p) => ({ ...p, _months: result.months }));
       }

@@ -18,7 +18,8 @@ export default function Dashboard() {
   const [tick, setTick] = useState(0);
   const navigate = useNavigate();
   const location = useLocation();
-  const { activeMissions, budget, cancelMission, user, loadMyMissions, updateBudget } = useApp();
+  const { activeMissions, budget, cancelMission, user, loadMyMissions, updateBudget, burnoutPrediction } = useApp();
+  const [dismissBurnout, setDismissBurnout] = useState(false);
 
   const handleCancel = async (missionId) => {
     await cancelMission(missionId);
@@ -75,8 +76,40 @@ export default function Dashboard() {
   const filtered = filter === "All" ? liveFeed : liveFeed.filter((m) => m.category === filter);
   const budgetDisplay = budget || demoBaseline;
 
+  // Burnout alert logic
+  const today = new Date().getDate();
+  const burnoutDay = burnoutPrediction?.burnoutDay;
+  const daysUntilBurnout = burnoutDay ? (burnoutDay - today <= 0 ? burnoutDay + 30 - today : burnoutDay - today) : 99;
+  const showBurnoutAlert = burnoutPrediction && daysUntilBurnout <= 5 && !dismissBurnout;
+
   return (
     <div className="space-y-4">
+      {/* Burnout alert banner */}
+      {showBurnoutAlert && (
+        <div className="bg-amber-500/[0.08] border border-amber-500/25 rounded-2xl p-4 flex items-start gap-3 animate-in">
+          <span className="text-xl shrink-0 mt-0.5">⚠️</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-300">Money running low soon</p>
+            <p className="text-xs text-amber-400/70 mt-0.5 leading-relaxed">
+              {daysUntilBurnout === 0
+                ? "Your money typically runs out around today. Be extra careful with spending!"
+                : daysUntilBurnout === 1
+                ? "Your money typically runs out tomorrow. Stick to essentials only."
+                : `Based on your spending patterns, you'll likely run out in ${daysUntilBurnout} days (around day ${burnoutDay}).`}
+            </p>
+            {burnoutPrediction.burnoutRisk && (
+              <p className="text-[11px] text-amber-400/40 mt-1">{burnoutPrediction.burnoutRisk}</p>
+            )}
+          </div>
+          <button
+            onClick={() => setDismissBurnout(true)}
+            className="text-amber-400/40 hover:text-amber-400 text-sm shrink-0 transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Active missions */}
       <div className="space-y-2">
         {activeMissions.length === 0 ? (
