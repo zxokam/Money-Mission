@@ -159,78 +159,85 @@ export default function LandingPage() {
       </div>
 
       {/* Financial Health Card */}
-      {ctx.budget && (
-        <div className="w-full max-w-xs mt-3 bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-2xl p-4 text-left">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-sm">📊</span>
-            <span className="text-xs font-semibold text-white/60 tracking-wide uppercase">Financial Health</span>
+      {ctx.budget && (() => {
+        const baseScore = ctx.budget?.healthScore || 60;
+        const penalty = urgent ? 25 : daysUntilBurnout <= 10 ? 10 : 0;
+        const score = Math.max(0, baseScore - penalty);
+        const status = score >= 80 ? "Strong" : score >= 55 ? "Stable" : score >= 30 ? "Tight" : "Critical";
+        const statusColors = score >= 80
+          ? { text: "text-emerald-400", ring: "#00e68a", bar: "bg-emerald-500", glow: "rgba(0,230,138,0.45)" }
+          : score >= 55
+          ? { text: "text-blue-400", ring: "#3b82f6", bar: "bg-blue-500", glow: "rgba(59,130,246,0.45)" }
+          : score >= 30
+          ? { text: "text-amber-400", ring: "#f59e0b", bar: "bg-amber-500", glow: "rgba(245,158,11,0.45)" }
+          : { text: "text-red-400", ring: "#ef4444", bar: "bg-red-500", glow: "rgba(239,68,68,0.45)" };
+        const degrees = (score / 100) * 360;
+        const desc = score >= 80 ? "Great job! Your financial health is excellent."
+          : score >= 55 ? "Doing okay. A few tweaks and you'll be set."
+          : score >= 30 ? "Getting tight. Watch your spending closely."
+          : "Critical. Cut non-essentials immediately.";
+
+        return (
+          <div className="w-full max-w-xs mt-4 bg-gradient-to-b from-white/[0.04] to-white/[0.01] backdrop-blur-xl border border-white/[0.08] rounded-3xl p-5 text-left shadow-[0_12px_40px_rgba(0,0,0,0.3)]">
+            <h3 className="text-xs font-semibold text-white/50 tracking-widest uppercase mb-4">Financial Health</h3>
+
+            {/* Score ring + status */}
+            <div className="flex items-center gap-5 mb-5">
+              {/* Score ring */}
+              <div className="shrink-0 relative w-[100px] h-[100px] flex items-center justify-center">
+                <div
+                  className="absolute inset-0 rounded-full"
+                  style={{ background: `conic-gradient(${statusColors.ring} 0deg ${degrees}deg, rgba(255,255,255,0.06) ${degrees}deg 360deg)`, boxShadow: `0 0 25px ${statusColors.glow}` }}
+                />
+                <div className="absolute inset-[14px] rounded-full bg-[#0a0f0e] border border-white/[0.04]" />
+                <div className="relative z-10 text-center leading-none">
+                  <span className="text-[28px] font-extrabold text-white block">{score}</span>
+                  <span className="text-[10px] text-white/30 font-medium mt-0.5 block">/100</span>
+                </div>
+              </div>
+
+              {/* Status + progress */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className={`text-base font-bold ${statusColors.text}`} style={{ textShadow: `0 0 12px ${statusColors.glow}` }}>{status}</span>
+                  {urgent && <span className="text-[9px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded-full">⚠ At risk</span>}
+                </div>
+                <p className="text-[10px] text-white/35 leading-relaxed mb-2.5">{desc}</p>
+                <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                  <div className={`h-full rounded-full transition-all duration-500 ${statusColors.bar}`} style={{ width: `${score}%`, boxShadow: `0 0 10px ${statusColors.glow}` }} />
+                </div>
+                <div className="text-right mt-1.5 text-[10px] font-semibold text-white/30">
+                  <span className={statusColors.text}>{score}</span>/100
+                </div>
+              </div>
+            </div>
+
+            {/* Stats grid */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-white/[0.03] rounded-2xl p-3 border border-white/[0.05]">
+                <span className="text-[9px] text-white/30 uppercase tracking-wider block mb-1">Budget</span>
+                <span className="text-sm font-bold text-white/80">RM{ctx.budget?.income || 0}<span className="text-[10px] text-white/25 font-normal">/mo</span></span>
+              </div>
+              <div className="bg-white/[0.03] rounded-2xl p-3 border border-white/[0.05]">
+                <span className="text-[9px] text-white/30 uppercase tracking-wider block mb-1">Last Balance</span>
+                <span className="text-sm font-bold text-white/80">
+                  {burnoutPrediction?.lastBalance ? `RM${Number(burnoutPrediction.lastBalance).toFixed(0)}` : "—"}
+                </span>
+              </div>
+              <div className="bg-white/[0.03] rounded-2xl p-3 border border-white/[0.05]">
+                <span className="text-[9px] text-white/30 uppercase tracking-wider block mb-1">Daily Limit</span>
+                <span className="text-sm font-bold text-white/80">RM{(ctx.budget?.safeDailyLimit || 0).toFixed(2)}<span className="text-[10px] text-white/25 font-normal">/day</span></span>
+              </div>
+              <div className="bg-white/[0.03] rounded-2xl p-3 border border-white/[0.05]">
+                <span className="text-[9px] text-white/30 uppercase tracking-wider block mb-1">Burnout Risk</span>
+                <span className={`text-sm font-bold ${urgent ? "text-amber-400" : "text-white/80"}`}>
+                  {burnoutDay ? `Day ${burnoutDay}` : "—"}
+                </span>
+              </div>
+            </div>
           </div>
-
-          {/* Score ring + status */}
-          {(() => {
-            const baseScore = ctx.budget?.healthScore || 60;
-            const penalty = urgent ? 25 : daysUntilBurnout <= 10 ? 10 : 0;
-            const score = Math.max(0, baseScore - penalty);
-            const status = score >= 80 ? "Strong" : score >= 55 ? "Stable" : score >= 30 ? "Tight" : "Critical";
-            const statusColor = score >= 80 ? "text-emerald-400" : score >= 55 ? "text-blue-400" : score >= 30 ? "text-amber-400" : "text-red-400";
-            const barColor = score >= 80 ? "bg-emerald-500" : score >= 55 ? "bg-blue-500" : score >= 30 ? "bg-amber-500" : "bg-red-500";
-
-            // Cash runway
-            let runwayDays = 18;
-            const leftover = (ctx.budget?.income || 0) - (ctx.budget?.requiredExpenses || (ctx.budget?.income || 0) * 0.6);
-            if (burnoutDay) {
-              runwayDays = daysUntilBurnout;
-            } else if (ctx.budget?.safeDailyLimit > 0 && leftover > 0) {
-              runwayDays = Math.round(leftover / ctx.budget.safeDailyLimit);
-            }
-
-            return (
-              <>
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="shrink-0 w-14 h-14 rounded-full border-2 border-white/[0.08] flex items-center justify-center bg-white/[0.02]">
-                    <div className="text-center">
-                      <span className="text-lg font-bold text-white/90 block leading-none">{score}</span>
-                      <span className="text-[9px] text-white/25">/100</span>
-                    </div>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-xs font-semibold ${statusColor}`}>{status}</span>
-                      {urgent && <span className="text-[9px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded-full">⚠ At risk</span>}
-                    </div>
-                    <div className="mt-1.5 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
-                      <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${score}%` }} />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-[10px]">
-                  <div className="bg-white/[0.03] rounded-xl p-2.5">
-                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Budget</span>
-                    <span className="text-white/70 font-semibold text-xs">RM{ctx.budget?.income || 0}/mo</span>
-                  </div>
-                  <div className="bg-white/[0.03] rounded-xl p-2.5">
-                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Last Balance</span>
-                    <span className="text-white/70 font-semibold text-xs">
-                      {burnoutPrediction?.lastBalance ? `RM${Number(burnoutPrediction.lastBalance).toFixed(0)}` : "—"}
-                    </span>
-                  </div>
-                  <div className="bg-white/[0.03] rounded-xl p-2.5">
-                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Runway</span>
-                    <span className="text-white/70 font-semibold text-xs">{runwayDays} days</span>
-                  </div>
-                  <div className="bg-white/[0.03] rounded-xl p-2.5">
-                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Burnout Risk</span>
-                    <span className={`font-semibold text-xs ${urgent ? "text-amber-400" : "text-white/70"}`}>
-                      {burnoutDay ? `Day ${burnoutDay}` : "—"}
-                    </span>
-                  </div>
-                </div>
-              </>
-            );
-          })()}
-        </div>
-      )}
+        );
+      })()}
 
       {/* Notification banner when urgent */}
       {urgent && (
