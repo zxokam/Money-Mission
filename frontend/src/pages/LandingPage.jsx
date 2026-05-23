@@ -184,10 +184,6 @@ export default function LandingPage() {
               runwayDays = Math.round(leftover / ctx.budget.safeDailyLimit);
             }
 
-            const trend = burnoutPrediction?.overallTrend || null;
-            const trendShort = trend ? (trend.includes("up") || trend.includes("+") ? "↑ Spending up" : trend.includes("down") || trend.includes("-") ? "↓ Spending down" : "→ Steady") : null;
-            const trendColor = trendShort?.startsWith("↑") ? "text-red-400" : trendShort?.startsWith("↓") ? "text-emerald-400" : "text-white/40";
-
             return (
               <>
                 <div className="flex items-center gap-3 mb-3">
@@ -210,23 +206,21 @@ export default function LandingPage() {
 
                 <div className="grid grid-cols-2 gap-2 text-[10px]">
                   <div className="bg-white/[0.03] rounded-xl p-2.5">
-                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Runway</span>
-                    <span className="text-white/70 font-semibold text-xs">{runwayDays} days</span>
+                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Budget</span>
+                    <span className="text-white/70 font-semibold text-xs">RM{ctx.budget?.income || 0}/mo</span>
                   </div>
                   <div className="bg-white/[0.03] rounded-xl p-2.5">
-                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Daily Limit</span>
-                    <span className="text-white/70 font-semibold text-xs">RM{ctx.budget?.safeDailyLimit || 0}/day</span>
+                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Last Balance</span>
+                    <span className="text-white/70 font-semibold text-xs">RM{(() => { const bal = (ctx.budget?.income || 0) - (ctx.budget?.safeDailyLimit || 0) * 30; return bal > 0 ? bal.toFixed(0) : 0; })()}</span>
+                  </div>
+                  <div className="bg-white/[0.03] rounded-xl p-2.5">
+                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Runway</span>
+                    <span className="text-white/70 font-semibold text-xs">{runwayDays} days</span>
                   </div>
                   <div className="bg-white/[0.03] rounded-xl p-2.5">
                     <span className="text-white/25 block text-[9px] uppercase tracking-wider">Burnout Risk</span>
                     <span className={`font-semibold text-xs ${urgent ? "text-amber-400" : "text-white/70"}`}>
                       {burnoutDay ? `Day ${burnoutDay}` : "—"}
-                    </span>
-                  </div>
-                  <div className="bg-white/[0.03] rounded-xl p-2.5">
-                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Trend</span>
-                    <span className={`font-semibold text-xs ${trendColor}`}>
-                      {trendShort || "—"}
                     </span>
                   </div>
                 </div>
