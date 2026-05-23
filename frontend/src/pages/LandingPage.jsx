@@ -158,6 +158,84 @@ export default function LandingPage() {
         </div>
       </div>
 
+      {/* Financial Health Card */}
+      {ctx.budget && (
+        <div className="w-full max-w-xs mt-3 bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-2xl p-4 text-left">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm">📊</span>
+            <span className="text-xs font-semibold text-white/60 tracking-wide uppercase">Financial Health</span>
+          </div>
+
+          {/* Score ring + status */}
+          {(() => {
+            const baseScore = ctx.budget?.healthScore || 60;
+            const penalty = urgent ? 25 : daysUntilBurnout <= 10 ? 10 : 0;
+            const score = Math.max(0, baseScore - penalty);
+            const status = score >= 80 ? "Strong" : score >= 55 ? "Stable" : score >= 30 ? "Tight" : "Critical";
+            const statusColor = score >= 80 ? "text-emerald-400" : score >= 55 ? "text-blue-400" : score >= 30 ? "text-amber-400" : "text-red-400";
+            const barColor = score >= 80 ? "bg-emerald-500" : score >= 55 ? "bg-blue-500" : score >= 30 ? "bg-amber-500" : "bg-red-500";
+
+            // Cash runway
+            let runwayDays = 18;
+            const leftover = (ctx.budget?.income || 0) - (ctx.budget?.requiredExpenses || (ctx.budget?.income || 0) * 0.6);
+            if (burnoutDay) {
+              runwayDays = daysUntilBurnout;
+            } else if (ctx.budget?.safeDailyLimit > 0 && leftover > 0) {
+              runwayDays = Math.round(leftover / ctx.budget.safeDailyLimit);
+            }
+
+            const trend = burnoutPrediction?.overallTrend || null;
+            const trendShort = trend ? (trend.includes("up") || trend.includes("+") ? "↑ Spending up" : trend.includes("down") || trend.includes("-") ? "↓ Spending down" : "→ Steady") : null;
+            const trendColor = trendShort?.startsWith("↑") ? "text-red-400" : trendShort?.startsWith("↓") ? "text-emerald-400" : "text-white/40";
+
+            return (
+              <>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="shrink-0 w-14 h-14 rounded-full border-2 border-white/[0.08] flex items-center justify-center bg-white/[0.02]">
+                    <div className="text-center">
+                      <span className="text-lg font-bold text-white/90 block leading-none">{score}</span>
+                      <span className="text-[9px] text-white/25">/100</span>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-xs font-semibold ${statusColor}`}>{status}</span>
+                      {urgent && <span className="text-[9px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded-full">⚠ At risk</span>}
+                    </div>
+                    <div className="mt-1.5 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                      <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${score}%` }} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[10px]">
+                  <div className="bg-white/[0.03] rounded-xl p-2.5">
+                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Runway</span>
+                    <span className="text-white/70 font-semibold text-xs">{runwayDays} days</span>
+                  </div>
+                  <div className="bg-white/[0.03] rounded-xl p-2.5">
+                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Daily Limit</span>
+                    <span className="text-white/70 font-semibold text-xs">RM{ctx.budget?.safeDailyLimit || 0}/day</span>
+                  </div>
+                  <div className="bg-white/[0.03] rounded-xl p-2.5">
+                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Burnout Risk</span>
+                    <span className={`font-semibold text-xs ${urgent ? "text-amber-400" : "text-white/70"}`}>
+                      {burnoutDay ? `Day ${burnoutDay}` : "—"}
+                    </span>
+                  </div>
+                  <div className="bg-white/[0.03] rounded-xl p-2.5">
+                    <span className="text-white/25 block text-[9px] uppercase tracking-wider">Trend</span>
+                    <span className={`font-semibold text-xs ${trendColor}`}>
+                      {trendShort || "—"}
+                    </span>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
       {/* Notification banner when urgent */}
       {urgent && (
         <div className="w-full max-w-xs mt-4 bg-amber-500/[0.06] border border-amber-500/20 rounded-2xl p-4 text-left animate-pulse">
